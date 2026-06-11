@@ -42,11 +42,12 @@
   header h1 { font-size: 15px; font-weight: 600; letter-spacing: .08em; }
   header h1 span { color: var(--accent); margin-right: 6px; }
   header h1 .ver { color: var(--text-dim); font-size: 11px; font-weight: 400; margin-left: 8px; letter-spacing: 0; }
-  #modeBtn {
+  #modeBtn, #backCamBtn {
     font-size: 12px; color: var(--text-dim);
     background: none; border: 1px solid var(--line);
     border-radius: 6px; padding: 6px 10px;
   }
+  #backCamBtn { color: var(--accent); border-color: var(--accent); margin-right: 6px; }
 
   /* ---------- カメラ／写真エリア ---------- */
   #stage {
@@ -286,8 +287,11 @@
 <body>
 
 <header>
-  <h1><span>■</span>工事黒板カメラ<span class="ver">v2.1</span></h1>
-  <button id="modeBtn">写真から作成</button>
+  <h1><span>■</span>工事黒板カメラ<span class="ver">v2.2</span></h1>
+  <div>
+    <button id="backCamBtn" class="hidden">📷 カメラへ</button>
+    <button id="modeBtn">写真から作成</button>
+  </div>
 </header>
 
 <div id="stage">
@@ -493,6 +497,13 @@
       });
       video.srcObject = stream;
       video.onloadedmetadata = () => showBoard();
+      // 写真モードからの復帰処理
+      stillImg.style.display = 'none';
+      video.style.display = 'block';
+      stillImage = null;
+      mode = 'live';
+      $('modeBtn').textContent = '写真から作成';
+      $('backCamBtn').classList.add('hidden');
       hint.classList.add('hidden');
       showBoard();
     } catch (e) {
@@ -500,6 +511,7 @@
     }
   }
   $('startCamBtn').addEventListener('click', startCamera);
+  $('backCamBtn').addEventListener('click', startCamera);
 
   /* ---------- 写真モード ---------- */
   $('modeBtn').addEventListener('click', () => $('fileInput').click());
@@ -520,6 +532,7 @@
         if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
         mode = 'still';
         $('modeBtn').textContent = '別の写真を選ぶ';
+        $('backCamBtn').classList.remove('hidden');
         hint.classList.add('hidden');
         showBoard();
         toast('黒板の位置を調整して、シャッターで合成します');
