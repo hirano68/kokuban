@@ -54,9 +54,9 @@
   }
   #frame {
     position: relative;
-    aspect-ratio: 3 / 4;
-    max-width: 100%; max-height: 100%;
-    height: 100%;
+    aspect-ratio: 4 / 3;
+    width: 100%;
+    max-height: 100%;
     background: #000;
     overflow: hidden;
   }
@@ -470,7 +470,7 @@
   });
 
   /* ---------- 撮影・合成 ---------- */
-  const OUT_W = 1200, OUT_H = 1600; // 出力サイズ固定（4:3縦・約190万画素）
+  const OUT_W = 1280, OUT_H = 960; // 出力サイズ固定（4:3横・約120万画素：工事写真標準）
   $('shutter').addEventListener('click', () => {
     const r = frame.getBoundingClientRect();
     let srcW, srcH, draw;
@@ -486,7 +486,7 @@
     }
 
     // 画面の見た目（4:3枠・object-fit: cover）と同じ範囲を切り取る
-    const frameRatio = OUT_W / OUT_H; // = 3:4
+    const frameRatio = OUT_W / OUT_H; // = 4:3
     const srcRatio = srcW / srcH;
     let cropW, cropH, cropX, cropY;
     if (srcRatio > frameRatio) { cropH = srcH; cropW = srcH * frameRatio; cropX = (srcW - cropW) / 2; cropY = 0; }
