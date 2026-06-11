@@ -137,6 +137,52 @@
   .micBtn.rec { background: var(--danger); border-color: var(--danger); animation: pulse 1s infinite; }
   @keyframes pulse { 50% { opacity: .55; } }
 
+  .ddBtn {
+    width: 38px; height: 42px; flex-shrink: 0;
+    border-radius: 8px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text-dim);
+    font-size: 14px;
+  }
+
+  /* ---------- 登録リスト選択シート ---------- */
+  #picker {
+    position: fixed; inset: 0; z-index: 10002;
+    background: rgba(0,0,0,.55);
+    display: none; align-items: flex-end;
+  }
+  #pickerSheet {
+    width: 100%;
+    background: var(--panel);
+    border-radius: 16px 16px 0 0;
+    max-height: 65dvh;
+    display: flex; flex-direction: column;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  #pickerTitle {
+    text-align: center; font-size: 14px; font-weight: 600;
+    padding: 14px; color: var(--text-dim);
+    border-bottom: 1px solid var(--line);
+  }
+  #pickerList { overflow-y: auto; flex: 1; }
+  .pickItem {
+    display: flex; align-items: center;
+    border-bottom: 1px solid var(--line);
+  }
+  .pickItem .pv {
+    flex: 1; padding: 15px 16px; font-size: 16px; color: var(--text);
+  }
+  .pickItem .px {
+    width: 52px; height: 52px; flex-shrink: 0;
+    background: none; border: none; color: var(--text-dim); font-size: 18px;
+  }
+  .pickEmpty { padding: 28px 16px; text-align: center; color: var(--text-dim); font-size: 14px; line-height: 1.7; }
+  #pickerClose {
+    margin: 10px 14px; padding: 14px 0;
+    font-size: 15px; font-weight: 600;
+    border-radius: 10px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text);
+  }
+
   #batchBar {
     display: flex; gap: 8px; margin-bottom: 10px;
   }
@@ -242,11 +288,13 @@
     <div class="fieldRow">
       <label>工事名</label>
       <input id="inProject" type="text" placeholder="例：◯◯邸 新築工事">
+      <button class="ddBtn" data-target="inProject">▼</button>
       <button class="micBtn" data-target="inProject">🎤</button>
     </div>
     <div class="fieldRow">
       <label>工種</label>
       <input id="inWork" type="text" placeholder="例：基礎工事">
+      <button class="ddBtn" data-target="inWork">▼</button>
       <button class="micBtn" data-target="inWork">🎤</button>
     </div>
     <div class="fieldRow">
@@ -284,6 +332,14 @@
   <div class="bcompany">㈱千田工務店</div>
 </div>
 
+<div id="picker">
+  <div id="pickerSheet">
+    <div id="pickerTitle"></div>
+    <div id="pickerList"></div>
+    <button id="pickerClose">閉じる</button>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <script>
@@ -306,6 +362,64 @@
   bind('inProject', 'bProject');
   bind('inWork', 'bWork');
   bind('inMemo', 'bMemo');
+
+  /* ---------- 入力の登録リスト（工事名・工種） ---------- */
+  const HIST_KEY = 'kokuban-history';
+  const HIST_LABEL = { inProject: '工事名', inWork: '工種' };
+  let hist = { inProject: [], inWork: [] };
+  try {
+    const saved = JSON.parse(localStorage.getItem(HIST_KEY));
+    if (saved && typeof saved === 'object') hist = Object.assign(hist, saved);
+  } catch (e) { /* 記憶機能が使えない環境では今回限りの動作になる */ }
+  function saveHist() {
+    try { localStorage.setItem(HIST_KEY, JSON.stringify(hist)); } catch (e) {}
+  }
+  function addHist(fieldId, value) {
+    value = (value || '').trim();
+    if (!value || !hist[fieldId]) return;
+    hist[fieldId] = [value, ...hist[fieldId].filter(v => v !== value)].slice(0, 30);
+    saveHist();
+  }
+
+  function openPicker(fieldId) {
+    const list = $('pickerList');
+    $('pickerTitle').textContent = HIST_LABEL[fieldId] + ' を選択';
+    list.innerHTML = '';
+    if (hist[fieldId].length === 0) {
+      list.innerHTML = '<div class="pickEmpty">まだ登録がありません。<br>入力して撮影すると、自動でここに登録されます。</div>';
+    } else {
+      hist[fieldId].forEach(v => {
+        const row = document.createElement('div');
+        row.className = 'pickItem';
+        const pv = document.createElement('div');
+        pv.className = 'pv';
+        pv.textContent = v;
+        pv.addEventListener('click', () => {
+          const input = $(fieldId);
+          input.value = v;
+          input.dispatchEvent(new Event('input'));
+          $('picker').style.display = 'none';
+        });
+        const px = document.createElement('button');
+        px.className = 'px';
+        px.textContent = '✕';
+        px.addEventListener('click', () => {
+          hist[fieldId] = hist[fieldId].filter(x => x !== v);
+          saveHist();
+          openPicker(fieldId);
+        });
+        row.appendChild(pv);
+        row.appendChild(px);
+        list.appendChild(row);
+      });
+    }
+    $('picker').style.display = 'flex';
+  }
+  document.querySelectorAll('.ddBtn').forEach(btn => {
+    btn.addEventListener('click', () => openPicker(btn.dataset.target));
+  });
+  $('pickerClose').addEventListener('click', () => $('picker').style.display = 'none');
+  $('picker').addEventListener('click', e => { if (e.target === $('picker')) $('picker').style.display = 'none'; });
 
   /* ---------- トースト ---------- */
   let toastTimer;
@@ -506,6 +620,8 @@
     const dataURL = canvas.toDataURL('image/jpeg', 0.92);
     shots.push({ dataURL: dataURL, blob: dataURLtoBlob(dataURL) });
     updateBatch();
+    addHist('inProject', $('inProject').value);
+    addHist('inWork', $('inWork').value);
     toast(`撮影しました（保存待ち ${shots.length}枚）`);
   });
 
