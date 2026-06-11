@@ -50,6 +50,15 @@
     position: relative; flex: 1; overflow: hidden;
     background: #000;
     touch-action: none;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #frame {
+    position: relative;
+    aspect-ratio: 3 / 4;
+    max-width: 100%; max-height: 100%;
+    height: 100%;
+    background: #000;
+    overflow: hidden;
   }
   #video, #stillImg {
     position: absolute; inset: 0;
@@ -126,6 +135,29 @@
   .micBtn.rec { background: var(--danger); border-color: var(--danger); animation: pulse 1s infinite; }
   @keyframes pulse { 50% { opacity: .55; } }
 
+  #batchBar {
+    display: flex; gap: 8px; margin-bottom: 10px;
+  }
+  #batchBar button {
+    flex: 1; padding: 11px 0; font-size: 14px;
+    border-radius: 10px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text);
+  }
+  #batchBar #saveAllBtn {
+    background: var(--accent); color: #1a1a1a; border: none; font-weight: 700;
+  }
+  #batchBar b { color: var(--accent); font-size: 16px; }
+  #saveAllBtn b { color: #1a1a1a; }
+
+  #resultList {
+    flex-direction: column !important;
+    justify-content: flex-start !important;
+    overflow-y: auto !important;
+    gap: 10px;
+  }
+  #resultList img { width: 100%; border: 1px solid var(--line); border-radius: 4px; }
+  #resultList .empty { color: var(--text-dim); font-size: 14px; margin: auto; }
+
   #controls {
     display: flex; align-items: center; justify-content: space-between;
     margin-top: 4px;
@@ -188,8 +220,10 @@
 </header>
 
 <div id="stage">
-  <video id="video" autoplay playsinline muted></video>
-  <img id="stillImg" alt="">
+  <div id="frame">
+    <video id="video" autoplay playsinline muted></video>
+    <img id="stillImg" alt="">
+  </div>
   <div id="stageHint">
     <div>カメラを起動して、黒板を重ねて撮影します。</div>
     <button id="startCamBtn">カメラを起動する</button>
@@ -198,6 +232,10 @@
 </div>
 
 <div id="panel">
+  <div id="batchBar" class="hidden">
+    <button id="openListBtn">保存待ち <b id="batchCount">0</b>枚</button>
+    <button id="saveAllBtn">まとめて保存</button>
+  </div>
   <div id="fields">
     <div class="fieldRow">
       <label>工事名</label>
@@ -226,11 +264,11 @@
 </div>
 
 <div id="result">
-  <div class="rTop"><img id="resultImg" alt="合成結果"></div>
-  <div id="resultNote">保存できない場合は、画像を長押し →「写真に追加」でも保存できます</div>
+  <div class="rTop" id="resultList"></div>
+  <div id="resultNote">保存できない場合は、各画像を長押し →「写真に追加」でも保存できます</div>
   <div class="rBtns">
-    <button id="retryBtn">撮り直す</button>
-    <button id="saveBtn">保存・共有</button>
+    <button id="retryBtn">閉じる</button>
+    <button id="saveBtn">まとめて保存</button>
   </div>
 </div>
 
@@ -249,7 +287,7 @@
 <script>
 (() => {
   const $ = id => document.getElementById(id);
-  const stage = $('stage'), video = $('video'), stillImg = $('stillImg');
+  const stage = $('stage'), frame = $('frame'), video = $('video'), stillImg = $('stillImg');
   const board = $('board'), hint = $('stageHint');
   let mode = 'live';          // 'live' | 'still'
   let stream = null;
@@ -324,7 +362,7 @@
 
   /* ---------- 黒板の表示と移動 ---------- */
   function showBoard() {
-    const r = stage.getBoundingClientRect();
+    const r = frame.getBoundingClientRect();
     if (!pos) pos = { x: r.width * 0.05, y: r.height * 0.35 };
     applyBoard();
   }
@@ -333,7 +371,7 @@
   window.addEventListener('resize', showBoard);
   showBoard();
   function applyBoard() {
-    const r = stage.getBoundingClientRect();
+    const r = frame.getBoundingClientRect();
     // 黒板がカメラ枠の外に出ないように制限する
     const bw = board.offsetWidth * scale;
     const bh = board.offsetHeight * scale;
@@ -432,41 +470,72 @@
   });
 
   /* ---------- 撮影・合成 ---------- */
+  const OUT_W = 1200, OUT_H = 1600; // 出力サイズ固定（4:3縦・約190万画素）
   $('shutter').addEventListener('click', () => {
-    const r = stage.getBoundingClientRect();
+    const r = frame.getBoundingClientRect();
     let srcW, srcH, draw;
 
     if (mode === 'live') {
       if (!stream || !video.videoWidth) { toast('先にカメラを起動してください'); return; }
       srcW = video.videoWidth; srcH = video.videoHeight;
-      draw = (ctx, cw, ch, cropX, cropY) => ctx.drawImage(video, cropX, cropY, cw, ch, 0, 0, cw, ch);
+      draw = (ctx, cropX, cropY, cw, ch) => ctx.drawImage(video, cropX, cropY, cw, ch, 0, 0, OUT_W, OUT_H);
     } else {
       if (!stillImage) { toast('先に写真を選んでください'); return; }
       srcW = stillImage.naturalWidth; srcH = stillImage.naturalHeight;
-      draw = (ctx, cw, ch, cropX, cropY) => ctx.drawImage(stillImage, cropX, cropY, cw, ch, 0, 0, cw, ch);
+      draw = (ctx, cropX, cropY, cw, ch) => ctx.drawImage(stillImage, cropX, cropY, cw, ch, 0, 0, OUT_W, OUT_H);
     }
 
-    // object-fit: cover と同じ切り取りを計算（画面の見た目どおりに合成する）
-    const stageRatio = r.width / r.height;
+    // 画面の見た目（4:3枠・object-fit: cover）と同じ範囲を切り取る
+    const frameRatio = OUT_W / OUT_H; // = 3:4
     const srcRatio = srcW / srcH;
     let cropW, cropH, cropX, cropY;
-    if (srcRatio > stageRatio) { cropH = srcH; cropW = srcH * stageRatio; cropX = (srcW - cropW) / 2; cropY = 0; }
-    else { cropW = srcW; cropH = srcW / stageRatio; cropX = 0; cropY = (srcH - cropH) / 2; }
+    if (srcRatio > frameRatio) { cropH = srcH; cropW = srcH * frameRatio; cropX = (srcW - cropW) / 2; cropY = 0; }
+    else { cropW = srcW; cropH = srcW / frameRatio; cropX = 0; cropY = (srcH - cropH) / 2; }
 
     const canvas = document.createElement('canvas');
-    canvas.width = Math.round(cropW); canvas.height = Math.round(cropH);
+    canvas.width = OUT_W; canvas.height = OUT_H;
     const ctx = canvas.getContext('2d');
-    draw(ctx, canvas.width, canvas.height, cropX, cropY);
+    draw(ctx, cropX, cropY, cropW, cropH);
 
     // 黒板を描画（画面px → 写真px の倍率）
-    const k = canvas.width / r.width;
+    const k = OUT_W / r.width;
     drawBoard(ctx, pos.x * k, pos.y * k, 230 * scale * k);
 
-    lastDataURL = canvas.toDataURL('image/jpeg', 0.92);
-    $('resultImg').src = lastDataURL;
-    $('result').style.display = 'flex';
-    canvas.toBlob(blob => { lastBlob = blob; }, 'image/jpeg', 0.92);
+    const dataURL = canvas.toDataURL('image/jpeg', 0.92);
+    shots.push({ dataURL: dataURL, blob: dataURLtoBlob(dataURL) });
+    updateBatch();
+    toast(`撮影しました（保存待ち ${shots.length}枚）`);
   });
+
+  /* ---------- 保存待ちリスト ---------- */
+  let shots = [];
+  function updateBatch() {
+    $('batchCount').textContent = shots.length;
+    $('batchBar').classList.toggle('hidden', shots.length === 0);
+  }
+  // リストの確認画面を開く
+  $('openListBtn').addEventListener('click', () => {
+    const list = $('resultList');
+    list.innerHTML = '';
+    if (shots.length === 0) {
+      list.innerHTML = '<div class="empty">保存待ちの写真はありません</div>';
+    } else {
+      shots.forEach(s => {
+        const img = document.createElement('img');
+        img.src = s.dataURL;
+        list.appendChild(img);
+      });
+    }
+    $('result').style.display = 'flex';
+  });
+
+  // dataURL → Blob 変換（同期処理）
+  function dataURLtoBlob(dataURL) {
+    const bin = atob(dataURL.split(',')[1]);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return new Blob([arr], { type: 'image/jpeg' });
+  }
 
   /* ---------- 黒板を Canvas に描く ---------- */
   function drawBoard(ctx, x, y, w) {
@@ -541,37 +610,35 @@
     return lines;
   }
 
-  /* ---------- 保存・共有 ---------- */
-  let lastBlob = null, lastDataURL = null;
-  $('saveBtn').addEventListener('click', async () => {
-    if (!lastDataURL) { toast('先に撮影してください'); return; }
-    // 1) 共有シート（iOSで「画像を保存」が選べる）
-    if (lastBlob && navigator.canShare) {
+  /* ---------- まとめて保存 ---------- */
+  async function saveAll() {
+    if (shots.length === 0) { toast('先に撮影してください'); return; }
+    if (navigator.canShare) {
       try {
-        const file = new File([lastBlob], `工事写真_${Date.now()}.jpg`, { type: 'image/jpeg' });
-        if (navigator.canShare({ files: [file] })) {
-          await navigator.share({ files: [file] });
-          toast('共有しました');
+        const stamp = Date.now();
+        const files = shots.map((s, i) =>
+          new File([s.blob], `工事写真_${stamp}_${String(i + 1).padStart(2, '0')}.jpg`, { type: 'image/jpeg' })
+        );
+        if (navigator.canShare({ files: files })) {
+          await navigator.share({ files: files });
+          toast(`${shots.length}枚を保存しました`);
+          shots = [];
+          updateBatch();
+          $('result').style.display = 'none';
           return;
         }
       } catch (e) {
         if (e && e.name === 'AbortError') return; // ユーザーがキャンセル
       }
     }
-    // 2) ダウンロードを試す
-    try {
-      const a = document.createElement('a');
-      a.href = lastDataURL;
-      a.download = `工事写真_${Date.now()}.jpg`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    } catch (e) { /* 無視して案内へ */ }
-    // 3) 確実な手順を案内
-    $('resultNote').textContent = '上の画像を長押し →「写真に追加」または「"写真"に保存」で保存できます';
+    // 共有が使えない場合：一覧画面で長押し保存を案内
+    $('openListBtn').click();
+    $('resultNote').textContent = '各画像を長押し →「写真に追加」で1枚ずつ保存してください';
     $('resultNote').style.color = '#e8a13a';
     toast('画像を長押しして保存してください', 3500);
-  });
+  }
+  $('saveAllBtn').addEventListener('click', saveAll);
+  $('saveBtn').addEventListener('click', saveAll);
   $('retryBtn').addEventListener('click', () => {
     $('result').style.display = 'none';
   });
