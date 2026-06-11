@@ -202,13 +202,32 @@
   #saveAllBtn b { color: #1a1a1a; }
 
   #resultList {
-    flex-direction: column !important;
-    justify-content: flex-start !important;
+    display: grid !important;
+    grid-template-columns: repeat(var(--cols, 1), 1fr);
+    gap: 8px;
+    align-content: start;
     overflow-y: auto !important;
-    gap: 10px;
+    touch-action: pan-y;
   }
-  #resultList img { width: 100%; border: 1px solid var(--line); border-radius: 4px; }
-  #resultList .empty { color: var(--text-dim); font-size: 14px; margin: auto; }
+  #resultList img { width: 100%; border: 1px solid var(--line); border-radius: 4px; display: block; }
+  #resultList .empty { color: var(--text-dim); font-size: 14px; margin: auto; grid-column: 1 / -1; text-align: center; }
+  .shotItem { position: relative; }
+  .shotItem .shotDel {
+    position: absolute; top: 4px; right: 4px;
+    padding: 6px 10px; font-size: 12px; font-weight: 600;
+    background: rgba(0,0,0,.7); color: #fff;
+    border: 1px solid rgba(255,255,255,.4); border-radius: 8px;
+  }
+  #listCtrl {
+    display: flex; align-items: center; justify-content: center; gap: 14px;
+    padding: 8px 14px 0;
+  }
+  #listCtrl button {
+    width: 44px; height: 38px;
+    border-radius: 8px; border: 1px solid var(--line);
+    background: var(--panel); color: var(--text); font-size: 18px;
+  }
+  #listCtrl span { font-size: 13px; color: var(--text-dim); min-width: 56px; text-align: center; }
 
   #controls {
     display: flex; align-items: center; justify-content: space-between;
@@ -267,7 +286,7 @@
 <body>
 
 <header>
-  <h1><span>■</span>工事黒板カメラ<span class="ver">v1.9</span></h1>
+  <h1><span>■</span>工事黒板カメラ<span class="ver">v2.1</span></h1>
   <button id="modeBtn">写真から作成</button>
 </header>
 
@@ -319,6 +338,11 @@
 </div>
 
 <div id="result">
+  <div id="listCtrl">
+    <button id="colBig">拡大</button>
+    <span id="colLabel">1列</span>
+    <button id="colSmall">縮小</button>
+  </div>
   <div class="rTop" id="resultList"></div>
   <div id="resultNote">保存できない場合は、各画像を長押し →「写真に追加」でも保存できます</div>
   <div class="rBtns">
@@ -384,6 +408,7 @@
     lines.forEach(line => { ms = Math.min(ms, fitSize(line, memoW, 12, 7)); });
     $('bMemo').textContent = m || '　';
     $('bMemo').style.fontSize = ms + 'px';
+    applyBoard(); // 黒板の高さ変化に合わせて枠内に収め直す
   }
   const bind = (inputId) => {
     $(inputId).addEventListener('input', refreshBoardText);
@@ -516,6 +541,7 @@
   window.addEventListener('resize', showBoard);
   showBoard();
   function applyBoard() {
+    if (!pos) return;
     const r = frame.getBoundingClientRect();
     // 黒板がカメラ枠の外に出ないように制限する
     const bw = board.offsetWidth * scale;
@@ -569,6 +595,7 @@
     const f = $('fields');
     const hidden = f.classList.toggle('hidden');
     $('toggleFields').textContent = hidden ? '入力を表示' : '入力を隠す';
+    applyBoard();
   });
 
   /* ---------- 音声入力（Web Speech API / ja-JP） ---------- */
@@ -660,22 +687,67 @@
   function updateBatch() {
     $('batchCount').textContent = shots.length;
     $('batchBar').classList.toggle('hidden', shots.length === 0);
+    applyBoard(); // バー表示で画面配置が変わるため黒板を枠内に戻す
   }
-  // リストの確認画面を開く
-  $('openListBtn').addEventListener('click', () => {
+  // リストの確認画面（1枚ずつ削除可能）
+  function renderList() {
     const list = $('resultList');
     list.innerHTML = '';
     if (shots.length === 0) {
       list.innerHTML = '<div class="empty">保存待ちの写真はありません</div>';
-    } else {
-      shots.forEach(s => {
-        const img = document.createElement('img');
-        img.src = s.dataURL;
-        list.appendChild(img);
-      });
+      return;
     }
+    shots.forEach((s, i) => {
+      const item = document.createElement('div');
+      item.className = 'shotItem';
+      const img = document.createElement('img');
+      img.src = s.dataURL;
+      const del = document.createElement('button');
+      del.className = 'shotDel';
+      del.textContent = '削除';
+      del.addEventListener('click', () => {
+        shots.splice(i, 1);
+        updateBatch();
+        renderList();
+        toast(`削除しました（残り ${shots.length}枚）`);
+      });
+      item.appendChild(img);
+      item.appendChild(del);
+      list.appendChild(item);
+    });
+  }
+  $('openListBtn').addEventListener('click', () => {
+    renderList();
     $('result').style.display = 'flex';
   });
+
+  /* ---------- 一覧の列数切替（1〜5列） ---------- */
+  let cols = 1;
+  try { cols = Math.min(5, Math.max(1, parseInt(localStorage.getItem('kokuban-cols')) || 1)); } catch (e) {}
+  function setCols(n) {
+    cols = Math.min(5, Math.max(1, n));
+    $('resultList').style.setProperty('--cols', cols);
+    $('colLabel').textContent = cols + '列';
+    try { localStorage.setItem('kokuban-cols', cols); } catch (e) {}
+  }
+  setCols(cols);
+  $('colBig').addEventListener('click', () => setCols(cols - 1));   // 列を減らす＝写真が大きく
+  $('colSmall').addEventListener('click', () => setCols(cols + 1)); // 列を増やす＝写真が小さく
+
+  // ピンチで拡大縮小
+  let listPinch = null;
+  const ldist = ts => Math.hypot(ts[0].clientX - ts[1].clientX, ts[0].clientY - ts[1].clientY);
+  $('resultList').addEventListener('touchstart', e => {
+    if (e.touches.length === 2) listPinch = { d: ldist(e.touches), c: cols };
+  }, { passive: true });
+  $('resultList').addEventListener('touchmove', e => {
+    if (!listPinch || e.touches.length !== 2) return;
+    e.preventDefault();
+    const ratio = ldist(e.touches) / listPinch.d;
+    if (ratio > 1.25) { setCols(listPinch.c - 1); listPinch = { d: ldist(e.touches), c: cols }; }
+    else if (ratio < 0.8) { setCols(listPinch.c + 1); listPinch = { d: ldist(e.touches), c: cols }; }
+  }, { passive: false });
+  $('resultList').addEventListener('touchend', () => { listPinch = null; });
 
   // dataURL → Blob 変換（同期処理）
   function dataURLtoBlob(dataURL) {
