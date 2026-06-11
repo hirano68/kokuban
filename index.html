@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>工事黒板カメラ</title>
+<style>
+  :root {
+    --board-green: #0d5938;
+    --board-green-deep: #093f28;
+    --frame: #d8d3c4;
+    --bg: #15171a;
+    --panel: #1f2226;
+    --line: #34383e;
+    --text: #f2f0ea;
+    --text-dim: #9aa0a8;
+    --accent: #e8a13a; /* 現場の保安色（山吹） */
+    --danger: #d9534f;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; overscroll-behavior: none; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", system-ui, sans-serif;
+    display: flex; flex-direction: column;
+    height: 100dvh;
+    user-select: none; -webkit-user-select: none;
+  }
+
+  /* ---------- ヘッダー ---------- */
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+  }
+  header h1 { font-size: 15px; font-weight: 600; letter-spacing: .08em; }
+  header h1 span { color: var(--accent); margin-right: 6px; }
+  #modeBtn {
+    font-size: 12px; color: var(--text-dim);
+    background: none; border: 1px solid var(--line);
+    border-radius: 6px; padding: 6px 10px;
+  }
+
+  /* ---------- カメラ／写真エリア ---------- */
+  #stage {
+    position: relative; flex: 1; overflow: hidden;
+    background: #000;
+    touch-action: none;
+  }
+  #video, #stillImg {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    object-fit: cover;
+    z-index: 0;
+  }
+  #stillImg { display: none; }
+  #stageHint {
+    position: absolute; inset: 0;
+    z-index: 5;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 14px; text-align: center; padding: 24px; color: var(--text-dim);
+    font-size: 14px; line-height: 1.8;
+  }
+  #stageHint button {
+    font-size: 15px; font-weight: 600;
+    color: #1a1a1a; background: var(--accent);
+    border: none; border-radius: 10px; padding: 14px 22px;
+  }
+  #stageHint .sub { font-size: 12px; }
+
+  /* ---------- 黒板オーバーレイ ---------- */
+  #board {
+    position: fixed;
+    left: 0; top: 0;
+    z-index: 9999;
+    will-change: transform;
+    width: 230px;
+    background: var(--board-green);
+    border: 4px solid var(--frame);
+    box-shadow: 0 4px 16px rgba(0,0,0,.45);
+    color: #fff;
+    padding: 8px 10px;
+    transform-origin: top left;
+    cursor: grab;
+  }
+  #board .bcompany {
+    text-align: right;
+    font-size: 11px;
+    font-weight: 700;
+    padding-top: 4px;
+    border-top: 1px solid rgba(255,255,255,.55);
+  }
+  #board .brow { display: flex; border-bottom: 1px solid rgba(255,255,255,.55); padding: 4px 0; }
+  #board .brow:last-child { border-bottom: none; }
+  #board .blabel { width: 58px; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+  #board .bval { flex: 1; font-size: 12px; word-break: break-all; }
+  #board .bmemo { min-height: 46px; font-size: 12px; padding: 5px 0 2px; line-height: 1.5; word-break: break-all; }
+
+  /* ---------- 操作パネル ---------- */
+  #panel {
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+  }
+  .fieldRow { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .fieldRow label {
+    width: 64px; font-size: 12px; color: var(--text-dim); flex-shrink: 0;
+  }
+  .fieldRow input {
+    flex: 1; min-width: 0;
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 9px 10px; font-size: 16px;
+  }
+  .fieldRow input:focus { outline: none; border-color: var(--accent); }
+  .micBtn {
+    width: 42px; height: 42px; flex-shrink: 0;
+    border-radius: 50%; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text);
+    font-size: 18px; line-height: 1;
+  }
+  .micBtn.rec { background: var(--danger); border-color: var(--danger); animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: .55; } }
+
+  #controls {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 4px;
+  }
+  .sizeBtns { display: flex; gap: 8px; }
+  .sizeBtns button, #toggleFields {
+    width: 46px; height: 46px;
+    border-radius: 10px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text); font-size: 20px;
+  }
+  #toggleFields { font-size: 13px; width: auto; padding: 0 12px; color: var(--text-dim); }
+  #shutter {
+    width: 68px; height: 68px;
+    border-radius: 50%;
+    border: 5px solid var(--text);
+    background: transparent;
+    position: relative;
+  }
+  #shutter::after {
+    content: ""; position: absolute; inset: 5px;
+    border-radius: 50%; background: var(--text);
+    transition: transform .1s;
+  }
+  #shutter:active::after { transform: scale(.85); }
+
+  /* ---------- 結果画面 ---------- */
+  #result {
+    position: fixed; inset: 0; z-index: 10000;
+    background: var(--bg);
+    display: none; flex-direction: column;
+  }
+  #result .rTop { flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: 12px; }
+  #resultImg { max-width: 100%; max-height: 100%; border: 1px solid var(--line); }
+  #result .rBtns {
+    display: flex; gap: 10px;
+    padding: 12px 14px calc(14px + env(safe-area-inset-bottom));
+  }
+  #result .rBtns button {
+    flex: 1; padding: 15px 0; font-size: 15px; font-weight: 600;
+    border-radius: 10px; border: none;
+  }
+  #saveBtn { background: var(--accent); color: #1a1a1a; }
+  #retryBtn { background: var(--panel); color: var(--text); border: 1px solid var(--line) !important; }
+  #resultNote { text-align: center; font-size: 12px; color: var(--text-dim); padding-bottom: 6px; }
+
+  #toast {
+    position: fixed; left: 50%; bottom: 120px; transform: translateX(-50%);
+    background: rgba(0,0,0,.85); color: #fff;
+    padding: 10px 18px; border-radius: 20px; font-size: 13px;
+    display: none; z-index: 10001; white-space: nowrap;
+  }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1><span>■</span>工事黒板カメラ</h1>
+  <button id="modeBtn">写真から作成</button>
+</header>
+
+<div id="stage">
+  <video id="video" autoplay playsinline muted></video>
+  <img id="stillImg" alt="">
+  <div id="stageHint">
+    <div>カメラを起動して、黒板を重ねて撮影します。</div>
+    <button id="startCamBtn">カメラを起動する</button>
+    <div class="sub">カメラが使えない場合は、右上の「写真から作成」で<br>撮影済みの写真に黒板を合成できます。</div>
+  </div>
+</div>
+
+<div id="panel">
+  <div id="fields">
+    <div class="fieldRow">
+      <label>工事名</label>
+      <input id="inProject" type="text" placeholder="例：◯◯邸 新築工事">
+      <button class="micBtn" data-target="inProject">🎤</button>
+    </div>
+    <div class="fieldRow">
+      <label>工種</label>
+      <input id="inWork" type="text" placeholder="例：基礎工事">
+      <button class="micBtn" data-target="inWork">🎤</button>
+    </div>
+    <div class="fieldRow">
+      <label>撮影内容</label>
+      <input id="inMemo" type="text" placeholder="例：配筋検査 全景">
+      <button class="micBtn" data-target="inMemo">🎤</button>
+    </div>
+  </div>
+  <div id="controls">
+    <button id="toggleFields">入力を隠す</button>
+    <button id="shutter" aria-label="撮影"></button>
+    <div class="sizeBtns">
+      <button id="sizeDown" aria-label="黒板を小さく">−</button>
+      <button id="sizeUp" aria-label="黒板を大きく">＋</button>
+    </div>
+  </div>
+</div>
+
+<div id="result">
+  <div class="rTop"><img id="resultImg" alt="合成結果"></div>
+  <div id="resultNote">保存できない場合は、画像を長押し →「写真に追加」でも保存できます</div>
+  <div class="rBtns">
+    <button id="retryBtn">撮り直す</button>
+    <button id="saveBtn">保存・共有</button>
+  </div>
+</div>
+
+<input id="fileInput" type="file" accept="image/*" capture="environment" class="hidden">
+
+<!-- 工事黒板（最前面に固定表示） -->
+<div id="board">
+  <div class="brow"><div class="blabel">工事名</div><div class="bval" id="bProject">　</div></div>
+  <div class="brow"><div class="blabel">工　種</div><div class="bval" id="bWork">　</div></div>
+  <div class="bmemo" id="bMemo">　</div>
+  <div class="bcompany">㈱千田工務店</div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const stage = $('stage'), video = $('video'), stillImg = $('stillImg');
+  const board = $('board'), hint = $('stageHint');
+  let mode = 'live';          // 'live' | 'still'
+  let stream = null;
+  let stillImage = null;      // 写真モードで読み込んだ Image
+  let scale = 1.0;
+  let pos = null;             // 黒板の左上位置（stage内px）
+
+  /* ---------- 入力欄 → 黒板へ反映 ---------- */
+  const bind = (inputId, boardId) => {
+    $(inputId).addEventListener('input', () => {
+      $(boardId).textContent = $(inputId).value || '　';
+    });
+  };
+  bind('inProject', 'bProject');
+  bind('inWork', 'bWork');
+  bind('inMemo', 'bMemo');
+
+  /* ---------- トースト ---------- */
+  let toastTimer;
+  function toast(msg, ms = 2200) {
+    const t = $('toast');
+    t.textContent = msg; t.style.display = 'block';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.style.display = 'none', ms);
+  }
+
+  /* ---------- カメラ起動 ---------- */
+  async function startCamera() {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+        audio: false
+      });
+      video.srcObject = stream;
+      video.onloadedmetadata = () => showBoard();
+      hint.classList.add('hidden');
+      showBoard();
+    } catch (e) {
+      toast('カメラを起動できませんでした。「写真から作成」をお試しください', 3500);
+    }
+  }
+  $('startCamBtn').addEventListener('click', startCamera);
+
+  /* ---------- 写真モード ---------- */
+  $('modeBtn').addEventListener('click', () => $('fileInput').click());
+  $('fileInput').addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    toast('写真を読み込んでいます…');
+    const reader = new FileReader();
+    reader.onerror = () => toast('写真を読み込めませんでした', 3000);
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => toast('この写真の形式は表示できませんでした', 3000);
+      img.onload = () => {
+        stillImage = img;
+        stillImg.src = reader.result;
+        stillImg.style.display = 'block';
+        video.style.display = 'none';
+        if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+        mode = 'still';
+        $('modeBtn').textContent = '別の写真を選ぶ';
+        hint.classList.add('hidden');
+        showBoard();
+        toast('黒板の位置を調整して、シャッターで合成します');
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  });
+
+  /* ---------- 黒板の表示と移動 ---------- */
+  function showBoard() {
+    const r = stage.getBoundingClientRect();
+    if (!pos) pos = { x: r.width * 0.05, y: r.height * 0.35 };
+    applyBoard();
+  }
+  // 起動直後から黒板を表示しておく
+  window.addEventListener('load', showBoard);
+  window.addEventListener('resize', showBoard);
+  showBoard();
+  function applyBoard() {
+    const r = stage.getBoundingClientRect();
+    // 黒板がカメラ枠の外に出ないように制限する
+    const bw = board.offsetWidth * scale;
+    const bh = board.offsetHeight * scale;
+    pos.x = Math.min(Math.max(pos.x, 0), Math.max(0, r.width - bw));
+    pos.y = Math.min(Math.max(pos.y, 0), Math.max(0, r.height - bh));
+    board.style.left = (r.left + pos.x) + 'px';
+    board.style.top = (r.top + pos.y) + 'px';
+    board.style.transform = `scale(${scale}) translateZ(0)`;
+  }
+
+  // ドラッグ（1本指）＋ ピンチ（2本指）
+  let drag = null, pinch = null;
+  board.addEventListener('touchstart', e => {
+    e.preventDefault();
+    if (e.touches.length === 1) {
+      const t = e.touches[0];
+      drag = { sx: t.clientX, sy: t.clientY, ox: pos.x, oy: pos.y };
+    } else if (e.touches.length === 2) {
+      drag = null;
+      pinch = { d: dist(e.touches), s: scale };
+    }
+  }, { passive: false });
+  board.addEventListener('touchmove', e => {
+    e.preventDefault();
+    if (pinch && e.touches.length === 2) {
+      scale = Math.min(2.5, Math.max(0.5, pinch.s * dist(e.touches) / pinch.d));
+      applyBoard();
+    } else if (drag && e.touches.length === 1) {
+      const t = e.touches[0];
+      pos.x = drag.ox + (t.clientX - drag.sx);
+      pos.y = drag.oy + (t.clientY - drag.sy);
+      applyBoard();
+    }
+  }, { passive: false });
+  board.addEventListener('touchend', () => { drag = null; pinch = null; });
+  const dist = ts => Math.hypot(ts[0].clientX - ts[1].clientX, ts[0].clientY - ts[1].clientY);
+
+  // マウス（PCでの確認用）
+  board.addEventListener('mousedown', e => {
+    drag = { sx: e.clientX, sy: e.clientY, ox: pos.x, oy: pos.y };
+    const mv = ev => { pos.x = drag.ox + ev.clientX - drag.sx; pos.y = drag.oy + ev.clientY - drag.sy; applyBoard(); };
+    const up = () => { drag = null; window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); };
+    window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up);
+  });
+
+  $('sizeUp').addEventListener('click', () => { scale = Math.min(2.5, scale + 0.1); applyBoard(); });
+  $('sizeDown').addEventListener('click', () => { scale = Math.max(0.5, scale - 0.1); applyBoard(); });
+
+  $('toggleFields').addEventListener('click', () => {
+    const f = $('fields');
+    const hidden = f.classList.toggle('hidden');
+    $('toggleFields').textContent = hidden ? '入力を表示' : '入力を隠す';
+  });
+
+  /* ---------- 音声入力（Web Speech API / ja-JP） ---------- */
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let activeRec = null;
+  document.querySelectorAll('.micBtn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const input = $(btn.dataset.target);
+      if (!SR) {
+        input.focus();
+        toast('入力欄をタップし、キーボード右下のマイク🎤で音声入力できます', 4000);
+        return;
+      }
+      if (activeRec) { activeRec.stop(); return; }
+      const rec = new SR();
+      rec.lang = 'ja-JP';
+      rec.interimResults = true;
+      rec.continuous = false;
+      activeRec = rec;
+      btn.classList.add('rec');
+      let got = false;
+      rec.onresult = e => {
+        got = true;
+        let text = '';
+        for (const r of e.results) text += r[0].transcript;
+        input.value = text;
+        input.dispatchEvent(new Event('input'));
+      };
+      rec.onerror = () => {
+        input.focus();
+        toast('マイクが使えないため、キーボード右下のマイク🎤をご利用ください', 4000);
+      };
+      rec.onend = () => {
+        btn.classList.remove('rec');
+        activeRec = null;
+        if (!got) {
+          input.focus();
+          toast('音声が認識できない場合は、キーボード右下のマイク🎤が使えます', 4000);
+        }
+      };
+      rec.start();
+      toast('どうぞお話しください…');
+    });
+  });
+
+  /* ---------- 撮影・合成 ---------- */
+  $('shutter').addEventListener('click', () => {
+    const r = stage.getBoundingClientRect();
+    let srcW, srcH, draw;
+
+    if (mode === 'live') {
+      if (!stream || !video.videoWidth) { toast('先にカメラを起動してください'); return; }
+      srcW = video.videoWidth; srcH = video.videoHeight;
+      draw = (ctx, cw, ch, cropX, cropY) => ctx.drawImage(video, cropX, cropY, cw, ch, 0, 0, cw, ch);
+    } else {
+      if (!stillImage) { toast('先に写真を選んでください'); return; }
+      srcW = stillImage.naturalWidth; srcH = stillImage.naturalHeight;
+      draw = (ctx, cw, ch, cropX, cropY) => ctx.drawImage(stillImage, cropX, cropY, cw, ch, 0, 0, cw, ch);
+    }
+
+    // object-fit: cover と同じ切り取りを計算（画面の見た目どおりに合成する）
+    const stageRatio = r.width / r.height;
+    const srcRatio = srcW / srcH;
+    let cropW, cropH, cropX, cropY;
+    if (srcRatio > stageRatio) { cropH = srcH; cropW = srcH * stageRatio; cropX = (srcW - cropW) / 2; cropY = 0; }
+    else { cropW = srcW; cropH = srcW / stageRatio; cropX = 0; cropY = (srcH - cropH) / 2; }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(cropW); canvas.height = Math.round(cropH);
+    const ctx = canvas.getContext('2d');
+    draw(ctx, canvas.width, canvas.height, cropX, cropY);
+
+    // 黒板を描画（画面px → 写真px の倍率）
+    const k = canvas.width / r.width;
+    drawBoard(ctx, pos.x * k, pos.y * k, 230 * scale * k);
+
+    lastDataURL = canvas.toDataURL('image/jpeg', 0.92);
+    $('resultImg').src = lastDataURL;
+    $('result').style.display = 'flex';
+    canvas.toBlob(blob => { lastBlob = blob; }, 'image/jpeg', 0.92);
+  });
+
+  /* ---------- 黒板を Canvas に描く ---------- */
+  function drawBoard(ctx, x, y, w) {
+    const u = w / 230;                 // 1単位
+    const padX = 10 * u, frame = 4 * u;
+    const rows = [
+      ['工事名', $('inProject').value],
+      ['工　種', $('inWork').value]
+    ];
+    const fsLabel = 12 * u, fsVal = 12 * u, lineH = 21 * u;
+    const memo = $('inMemo').value;
+
+    // メモの折り返し計算
+    ctx.font = `${fsVal}px "Hiragino Sans", sans-serif`;
+    const memoMaxW = w - padX * 2;
+    const memoLines = wrapText(ctx, memo || '　', memoMaxW);
+    const memoH = Math.max(46 * u, memoLines.length * (fsVal * 1.5) + 8 * u);
+    const companyH = 20 * u;
+    const h = 8 * u + rows.length * lineH + memoH + companyH + 8 * u;
+
+    // 枠と地
+    ctx.fillStyle = '#d8d3c4';
+    ctx.fillRect(x - frame, y - frame, w + frame * 2, h + frame * 2);
+    ctx.fillStyle = '#0d5938';
+    ctx.fillRect(x, y, w, h);
+
+    // 行
+    ctx.textBaseline = 'middle';
+    let cy = y + 8 * u;
+    rows.forEach(([label, val]) => {
+      ctx.fillStyle = '#fff';
+      ctx.font = `bold ${fsLabel}px "Hiragino Sans", sans-serif`;
+      ctx.fillText(label, x + padX, cy + lineH / 2);
+      ctx.font = `${fsVal}px "Hiragino Sans", sans-serif`;
+      ctx.fillText(val || '', x + padX + 58 * u, cy + lineH / 2, w - padX * 2 - 58 * u);
+      cy += lineH;
+      ctx.strokeStyle = 'rgba(255,255,255,.55)';
+      ctx.lineWidth = 1 * u;
+      ctx.beginPath(); ctx.moveTo(x + padX, cy); ctx.lineTo(x + w - padX, cy); ctx.stroke();
+    });
+
+    // メモ
+    ctx.fillStyle = '#fff';
+    ctx.font = `${fsVal}px "Hiragino Sans", sans-serif`;
+    let my = cy + 6 * u + fsVal * 0.75;
+    memoLines.forEach(line => {
+      ctx.fillText(line, x + padX, my);
+      my += fsVal * 1.5;
+    });
+
+    // 社名（右下）
+    const compY = y + h - companyH;
+    ctx.strokeStyle = 'rgba(255,255,255,.55)';
+    ctx.lineWidth = 1 * u;
+    ctx.beginPath(); ctx.moveTo(x + padX, compY); ctx.lineTo(x + w - padX, compY); ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${11 * u}px "Hiragino Sans", sans-serif`;
+    ctx.textAlign = 'right';
+    ctx.fillText('㈱千田工務店', x + w - padX, compY + companyH / 2 + 2 * u);
+    ctx.textAlign = 'left';
+  }
+
+  function wrapText(ctx, text, maxW) {
+    const lines = [];
+    let line = '';
+    for (const ch of text) {
+      if (ch === '\n') { lines.push(line); line = ''; continue; }
+      if (ctx.measureText(line + ch).width > maxW && line) { lines.push(line); line = ch; }
+      else line += ch;
+    }
+    lines.push(line);
+    return lines;
+  }
+
+  /* ---------- 保存・共有 ---------- */
+  let lastBlob = null, lastDataURL = null;
+  $('saveBtn').addEventListener('click', async () => {
+    if (!lastDataURL) { toast('先に撮影してください'); return; }
+    // 1) 共有シート（iOSで「画像を保存」が選べる）
+    if (lastBlob && navigator.canShare) {
+      try {
+        const file = new File([lastBlob], `工事写真_${Date.now()}.jpg`, { type: 'image/jpeg' });
+        if (navigator.canShare({ files: [file] })) {
+          await navigator.share({ files: [file] });
+          toast('共有しました');
+          return;
+        }
+      } catch (e) {
+        if (e && e.name === 'AbortError') return; // ユーザーがキャンセル
+      }
+    }
+    // 2) ダウンロードを試す
+    try {
+      const a = document.createElement('a');
+      a.href = lastDataURL;
+      a.download = `工事写真_${Date.now()}.jpg`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (e) { /* 無視して案内へ */ }
+    // 3) 確実な手順を案内
+    $('resultNote').textContent = '上の画像を長押し →「写真に追加」または「"写真"に保存」で保存できます';
+    $('resultNote').style.color = '#e8a13a';
+    toast('画像を長押しして保存してください', 3500);
+  });
+  $('retryBtn').addEventListener('click', () => {
+    $('result').style.display = 'none';
+  });
+})();
+</script>
+</body>
+</html>
