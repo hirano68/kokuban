@@ -283,12 +283,59 @@
     display: none; z-index: 10001; white-space: nowrap;
   }
   .hidden { display: none !important; }
+
+  /* ---------- 黒板／メモ切替タブ ---------- */
+  #toolTabs { display: flex; gap: 6px; margin-bottom: 10px; }
+  #toolTabs button {
+    flex: 1; padding: 9px 0; font-size: 13px;
+    border-radius: 8px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text-dim);
+  }
+  #toolTabs button.active {
+    background: var(--accent); color: #1a1a1a; font-weight: 700; border-color: var(--accent);
+  }
+
+  /* ---------- メモ・書込みツール ---------- */
+  #memoTools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  #memoTools button {
+    padding: 9px 10px; font-size: 13px;
+    border-radius: 8px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text);
+  }
+  #memoTools #penBtn.active { background: var(--danger); border-color: var(--danger); color: #fff; }
+  .inkColor { width: 34px; height: 34px; border-radius: 50% !important; padding: 0 !important; border: 2px solid var(--line) !important; }
+  .inkColor.active { border-color: #fff !important; box-shadow: 0 0 0 2px var(--accent); }
+
+  /* ---------- 吹き出し ---------- */
+  .bubble {
+    position: fixed; z-index: 9995;
+    transform-origin: top left;
+    background: #fff; color: #1a1a1a;
+    border: 2px solid #e0312d; border-radius: 8px;
+    padding: 8px; font-size: 13px; line-height: 1.4;
+    max-width: 200px; white-space: pre-wrap; word-break: break-all;
+    box-shadow: 0 2px 8px rgba(0,0,0,.35);
+    cursor: grab;
+  }
+  .bubble.sel { outline: 2px dashed var(--accent); outline-offset: 2px; }
+  .bubble::after {
+    content: ""; position: absolute; left: 14px; bottom: -9px;
+    border-width: 9px 7px 0 7px; border-style: solid;
+    border-color: #e0312d transparent transparent transparent;
+  }
+
+  /* ---------- ペン書込みレイヤー ---------- */
+  #inkCanvas {
+    position: fixed; z-index: 9990;
+    pointer-events: none; display: none;
+    touch-action: none;
+  }
 </style>
 </head>
 <body>
 
 <header>
-  <h1><span>■</span>工事黒板カメラ<span class="ver">v2.4</span></h1>
+  <h1><span>■</span>工事黒板カメラ<span class="ver">v2.5</span></h1>
   <div>
     <button id="backCamBtn" class="hidden">📷 カメラへ</button>
     <button id="modeBtn">写真を選ぶ</button>
@@ -312,6 +359,10 @@
     <button id="openListBtn">保存待ち <b id="batchCount">0</b>枚</button>
     <button id="saveAllBtn">まとめて保存</button>
   </div>
+  <div id="toolTabs">
+    <button id="tabBoard" class="active">黒板</button>
+    <button id="tabMemo">メモ・書込み</button>
+  </div>
   <div id="fields">
     <div class="fieldRow">
       <label>工事名</label>
@@ -330,6 +381,22 @@
       <textarea id="inMemo" rows="2" placeholder="例：配筋検査 全景"></textarea>
       <button class="ddBtn" data-target="inMemo">▼</button>
       <button class="micBtn" data-target="inMemo">🎤</button>
+    </div>
+  </div>
+  <div id="memoPanel" class="hidden">
+    <div class="fieldRow">
+      <label>メモ</label>
+      <input id="inBubble" type="text" placeholder="吹き出しの文字を入力">
+      <button class="micBtn" data-target="inBubble">🎤</button>
+    </div>
+    <div id="memoTools">
+      <button id="addBubbleBtn">＋吹き出し</button>
+      <button id="delBubbleBtn">削除</button>
+      <button id="penBtn">🖊 ペン</button>
+      <button class="inkColor active" data-color="#e0312d" style="background:#e0312d" aria-label="赤"></button>
+      <button class="inkColor" data-color="#ffd400" style="background:#ffd400" aria-label="黄"></button>
+      <button class="inkColor" data-color="#ffffff" style="background:#ffffff" aria-label="白"></button>
+      <button id="undoInkBtn">↩ 取消</button>
     </div>
   </div>
   <div id="controls">
@@ -365,6 +432,8 @@
   <div class="bmemo" id="bMemo">　</div>
   <div class="bcompany">㈱千田工務店</div>
 </div>
+
+<canvas id="inkCanvas"></canvas>
 
 <div id="picker">
   <div id="pickerSheet">
@@ -620,11 +689,246 @@
   $('sizeUp').addEventListener('click', () => { scale = Math.min(2.5, scale + 0.1); applyBoard(); });
   $('sizeDown').addEventListener('click', () => { scale = Math.max(0.5, scale - 0.1); applyBoard(); });
 
+  /* ---------- ツール切替（黒板／メモ・書込み） ---------- */
+  let tool = 'board';
+  const inkCanvas = $('inkCanvas');
+  const inkCtx = inkCanvas.getContext('2d');
+  function setTool(t) {
+    tool = t;
+    $('tabBoard').classList.toggle('active', t === 'board');
+    $('tabMemo').classList.toggle('active', t === 'memo');
+    $('fields').classList.toggle('hidden', t !== 'board');
+    $('memoPanel').classList.toggle('hidden', t !== 'memo');
+    board.style.display = t === 'board' ? '' : 'none';
+    document.querySelectorAll('.bubble').forEach(el => el.style.display = t === 'memo' ? '' : 'none');
+    inkCanvas.style.display = t === 'memo' ? 'block' : 'none';
+    layoutAnn();
+    applyBoard();
+  }
+  $('tabBoard').addEventListener('click', () => setTool('board'));
+  $('tabMemo').addEventListener('click', () => setTool('memo'));
+
+  /* ---------- 吹き出し ---------- */
+  let bubbles = [];      // {x, y(枠内の比率), scale, text, el}
+  let selBubble = null;
+  function addBubble(text) {
+    const b = { x: 0.3, y: 0.25, scale: 1, text: text || 'メモ', el: null };
+    const el = document.createElement('div');
+    el.className = 'bubble';
+    document.body.appendChild(el);
+    b.el = el;
+    bubbles.push(b);
+    attachBubbleEvents(b);
+    b.el.textContent = b.text;
+    selectBubble(b);
+    layoutAnn();
+  }
+  function selectBubble(b) {
+    selBubble = b;
+    document.querySelectorAll('.bubble').forEach(el => el.classList.remove('sel'));
+    if (b) { b.el.classList.add('sel'); $('inBubble').value = b.text; }
+    else $('inBubble').value = '';
+  }
+  function attachBubbleEvents(b) {
+    let bd = null, bp = null;
+    b.el.addEventListener('touchstart', e => {
+      e.preventDefault();
+      selectBubble(b);
+      const r = frame.getBoundingClientRect();
+      if (e.touches.length === 1) {
+        const t = e.touches[0];
+        bd = { sx: t.clientX, sy: t.clientY, ox: b.x * r.width, oy: b.y * r.height, rw: r.width, rh: r.height };
+      } else if (e.touches.length === 2) {
+        bd = null;
+        bp = { d: dist(e.touches), s: b.scale };
+      }
+    }, { passive: false });
+    b.el.addEventListener('touchmove', e => {
+      e.preventDefault();
+      if (bp && e.touches.length === 2) {
+        b.scale = Math.min(2.5, Math.max(0.6, bp.s * dist(e.touches) / bp.d));
+        layoutAnn();
+      } else if (bd && e.touches.length === 1) {
+        const t = e.touches[0];
+        b.x = (bd.ox + t.clientX - bd.sx) / bd.rw;
+        b.y = (bd.oy + t.clientY - bd.sy) / bd.rh;
+        layoutAnn();
+      }
+    }, { passive: false });
+    b.el.addEventListener('touchend', () => { bd = null; bp = null; });
+    b.el.addEventListener('mousedown', e => {
+      selectBubble(b);
+      const r = frame.getBoundingClientRect();
+      const st = { sx: e.clientX, sy: e.clientY, ox: b.x * r.width, oy: b.y * r.height };
+      const mv = ev => { b.x = (st.ox + ev.clientX - st.sx) / r.width; b.y = (st.oy + ev.clientY - st.sy) / r.height; layoutAnn(); };
+      const up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); };
+      window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up);
+    });
+  }
+  $('addBubbleBtn').addEventListener('click', () => addBubble($('inBubble').value.trim() || 'メモ'));
+  $('delBubbleBtn').addEventListener('click', () => {
+    if (!selBubble) { toast('削除する吹き出しをタップで選んでください'); return; }
+    selBubble.el.remove();
+    bubbles = bubbles.filter(b => b !== selBubble);
+    selectBubble(null);
+    toast('吹き出しを削除しました');
+  });
+  $('inBubble').addEventListener('input', () => {
+    if (!selBubble) {
+      if ($('inBubble').value.trim()) addBubble($('inBubble').value);
+      return;
+    }
+    selBubble.text = $('inBubble').value;
+    selBubble.el.textContent = selBubble.text || ' ';
+    layoutAnn();
+  });
+
+  /* ---------- ペン書込み ---------- */
+  let penOn = false, inkColor = '#e0312d', strokes = [];
+  $('penBtn').addEventListener('click', () => {
+    penOn = !penOn;
+    $('penBtn').classList.toggle('active', penOn);
+    inkCanvas.style.pointerEvents = penOn ? 'auto' : 'none';
+    toast(penOn ? 'ペンON：指でなぞって書込みできます' : 'ペンOFF');
+  });
+  document.querySelectorAll('.inkColor').forEach(btn => {
+    btn.addEventListener('click', () => {
+      inkColor = btn.dataset.color;
+      document.querySelectorAll('.inkColor').forEach(x => x.classList.remove('active'));
+      btn.classList.add('active');
+    });
+  });
+  $('undoInkBtn').addEventListener('click', () => {
+    if (strokes.length === 0) { toast('取り消す書込みがありません'); return; }
+    strokes.pop();
+    redrawInk();
+  });
+  let curStroke = null;
+  inkCanvas.addEventListener('touchstart', e => {
+    e.preventDefault();
+    if (!penOn || e.touches.length !== 1) return;
+    const r = frame.getBoundingClientRect();
+    const t = e.touches[0];
+    curStroke = { color: inkColor, pts: [{ x: (t.clientX - r.left) / r.width, y: (t.clientY - r.top) / r.height }] };
+    strokes.push(curStroke);
+  }, { passive: false });
+  inkCanvas.addEventListener('touchmove', e => {
+    e.preventDefault();
+    if (!curStroke || e.touches.length !== 1) return;
+    const r = frame.getBoundingClientRect();
+    const t = e.touches[0];
+    curStroke.pts.push({ x: (t.clientX - r.left) / r.width, y: (t.clientY - r.top) / r.height });
+    redrawInk();
+  }, { passive: false });
+  inkCanvas.addEventListener('touchend', () => { curStroke = null; });
+
+  function redrawInk() {
+    inkCtx.clearRect(0, 0, inkCanvas.width, inkCanvas.height);
+    inkCtx.lineCap = 'round'; inkCtx.lineJoin = 'round';
+    strokes.forEach(s => {
+      inkCtx.strokeStyle = s.color;
+      inkCtx.lineWidth = 4;
+      inkCtx.beginPath();
+      s.pts.forEach((p, i) => {
+        const px = p.x * inkCanvas.width, py = p.y * inkCanvas.height;
+        i ? inkCtx.lineTo(px, py) : inkCtx.moveTo(px, py);
+      });
+      inkCtx.stroke();
+    });
+  }
+
+  /* ---------- メモ・書込みレイヤーの配置 ---------- */
+  function layoutAnn() {
+    const r = frame.getBoundingClientRect();
+    bubbles.forEach(b => {
+      b.x = Math.min(Math.max(b.x, 0), 0.92);
+      b.y = Math.min(Math.max(b.y, 0), 0.92);
+      b.el.style.left = (r.left + b.x * r.width) + 'px';
+      b.el.style.top = (r.top + b.y * r.height) + 'px';
+      b.el.style.transform = `scale(${b.scale}) translateZ(0)`;
+    });
+    inkCanvas.style.left = r.left + 'px';
+    inkCanvas.style.top = r.top + 'px';
+    inkCanvas.style.width = r.width + 'px';
+    inkCanvas.style.height = r.height + 'px';
+    if (inkCanvas.width !== Math.round(r.width)) {
+      inkCanvas.width = Math.round(r.width);
+      inkCanvas.height = Math.round(r.height);
+    }
+    redrawInk();
+  }
+  window.addEventListener('resize', layoutAnn);
+
+  /* ---------- メモ・吹き出しを写真へ合成 ---------- */
+  function roundRect(ctx, x, y, w, h, rad) {
+    ctx.beginPath();
+    ctx.moveTo(x + rad, y);
+    ctx.arcTo(x + w, y, x + w, y + h, rad);
+    ctx.arcTo(x + w, y + h, x, y + h, rad);
+    ctx.arcTo(x, y + h, x, y, rad);
+    ctx.arcTo(x, y, x + w, y, rad);
+    ctx.closePath();
+  }
+  function drawAnnotations(ctx, k) {
+    // ペン書込み
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    strokes.forEach(s => {
+      ctx.strokeStyle = s.color;
+      ctx.lineWidth = 4 * k;
+      ctx.beginPath();
+      s.pts.forEach((p, i) => {
+        const px = p.x * OUT_W, py = p.y * OUT_H;
+        i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+      });
+      ctx.stroke();
+    });
+    // 吹き出し
+    ctx.textBaseline = 'alphabetic';
+    bubbles.forEach(b => {
+      const q = b.scale * k;
+      const fs = 13 * q, pad = 8 * q, maxW = 184 * q;
+      ctx.font = `${fs}px "Hiragino Sans", sans-serif`;
+      const lines = [];
+      (b.text || ' ').split('\n').forEach(l => lines.push(...wrapLine(ctx, l, maxW)));
+      let tw = 0;
+      lines.forEach(l => tw = Math.max(tw, ctx.measureText(l).width));
+      const lh = fs * 1.4;
+      const bw = tw + pad * 2 + 4 * q;
+      const bh = lines.length * lh + pad * 2;
+      const bx = b.x * OUT_W, by = b.y * OUT_H;
+      // 本体
+      roundRect(ctx, bx, by, bw, bh, 8 * q);
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+      ctx.strokeStyle = '#e0312d';
+      ctx.lineWidth = 2 * q;
+      ctx.stroke();
+      // しっぽ
+      ctx.beginPath();
+      ctx.moveTo(bx + 14 * q, by + bh - 1 * q);
+      ctx.lineTo(bx + 10 * q, by + bh + 9 * q);
+      ctx.lineTo(bx + 28 * q, by + bh - 1 * q);
+      ctx.closePath();
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+      ctx.strokeStyle = '#e0312d';
+      ctx.stroke();
+      // 文字
+      ctx.fillStyle = '#1a1a1a';
+      let ty = by + pad + fs * 0.85;
+      lines.forEach(l => {
+        ctx.fillText(l, bx + pad + 2 * q, ty);
+        ty += lh;
+      });
+    });
+  }
+
   $('toggleFields').addEventListener('click', () => {
-    const f = $('fields');
+    const f = tool === 'board' ? $('fields') : $('memoPanel');
     const hidden = f.classList.toggle('hidden');
     $('toggleFields').textContent = hidden ? '入力を表示' : '入力を隠す';
     applyBoard();
+    layoutAnn();
   });
 
   /* ---------- 音声入力（Web Speech API / ja-JP） ---------- */
@@ -698,16 +1002,20 @@
     const ctx = canvas.getContext('2d');
     draw(ctx, cropX, cropY, cropW, cropH);
 
-    // 黒板を描画（画面px → 写真px の倍率）
+    // モードに応じて合成（画面px → 写真px の倍率）
     const k = OUT_W / r.width;
-    drawBoard(ctx, pos.x * k, pos.y * k, 190 * scale * k);
+    if (tool === 'board') {
+      drawBoard(ctx, pos.x * k, pos.y * k, 190 * scale * k);
+      addHist('inProject', $('inProject').value);
+      addHist('inWork', $('inWork').value);
+      addHist('inMemo', $('inMemo').value);
+    } else {
+      drawAnnotations(ctx, k);
+    }
 
     const dataURL = canvas.toDataURL('image/jpeg', 0.92);
     shots.push({ dataURL: dataURL, blob: dataURLtoBlob(dataURL) });
     updateBatch();
-    addHist('inProject', $('inProject').value);
-    addHist('inWork', $('inWork').value);
-    addHist('inMemo', $('inMemo').value);
     toast(`撮影しました（保存待ち ${shots.length}枚）`);
   });
 
@@ -717,6 +1025,7 @@
     $('batchCount').textContent = shots.length;
     $('batchBar').classList.toggle('hidden', shots.length === 0);
     applyBoard(); // バー表示で画面配置が変わるため黒板を枠内に戻す
+    layoutAnn();
   }
   // リストの確認画面（1枚ずつ削除可能）
   function renderList() {
