@@ -119,9 +119,9 @@
     border-top: 1px solid var(--line);
     padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
   }
-  .fieldRow { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .fieldRow { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
   .fieldRow label {
-    width: 64px; font-size: 12px; color: var(--text-dim); flex-shrink: 0;
+    width: 48px; font-size: 11px; color: var(--text-dim); flex-shrink: 0;
   }
   .fieldRow input, .fieldRow textarea {
     flex: 1; min-width: 0;
@@ -129,23 +129,24 @@
     border: 1px solid var(--line); border-radius: 8px;
     padding: 9px 10px; font-size: 16px;
     font-family: inherit;
+    -webkit-user-select: text; user-select: text;
   }
   .fieldRow textarea { resize: none; line-height: 1.45; }
   .fieldRow input:focus, .fieldRow textarea:focus { outline: none; border-color: var(--accent); }
   .micBtn {
-    width: 42px; height: 42px; flex-shrink: 0;
+    width: 38px; height: 40px; flex-shrink: 0;
     border-radius: 50%; border: 1px solid var(--line);
     background: var(--bg); color: var(--text);
-    font-size: 18px; line-height: 1;
+    font-size: 16px; line-height: 1;
   }
   .micBtn.rec { background: var(--danger); border-color: var(--danger); animation: pulse 1s infinite; }
   @keyframes pulse { 50% { opacity: .55; } }
 
   .ddBtn {
-    width: 38px; height: 42px; flex-shrink: 0;
+    width: 32px; height: 40px; flex-shrink: 0;
     border-radius: 8px; border: 1px solid var(--line);
     background: var(--bg); color: var(--text-dim);
-    font-size: 14px;
+    font-size: 13px;
   }
 
   /* ---------- 登録リスト選択シート ---------- */
@@ -287,10 +288,10 @@
 <body>
 
 <header>
-  <h1><span>■</span>工事黒板カメラ<span class="ver">v2.2</span></h1>
+  <h1><span>■</span>工事黒板カメラ<span class="ver">v2.4</span></h1>
   <div>
     <button id="backCamBtn" class="hidden">📷 カメラへ</button>
-    <button id="modeBtn">写真から作成</button>
+    <button id="modeBtn">写真を選ぶ</button>
   </div>
 </header>
 
@@ -302,7 +303,7 @@
   <div id="stageHint">
     <div>カメラを起動して、黒板を重ねて撮影します。</div>
     <button id="startCamBtn">カメラを起動する</button>
-    <div class="sub">カメラが使えない場合は、右上の「写真から作成」で<br>撮影済みの写真に黒板を合成できます。</div>
+    <div class="sub">カメラが使えない場合は、右上の「写真を選ぶ」で<br>撮影済みの写真に黒板を合成できます。</div>
   </div>
 </div>
 
@@ -355,7 +356,7 @@
   </div>
 </div>
 
-<input id="fileInput" type="file" accept="image/*" capture="environment" class="hidden">
+<input id="fileInput" type="file" accept="image/*" class="hidden">
 
 <!-- 工事黒板（最前面に固定表示） -->
 <div id="board">
@@ -401,17 +402,32 @@
   function refreshBoardText() {
     const valW = 190 - 20 - 58;   // 黒板幅 − 余白 − ラベル幅
     const memoW = 190 - 20;
+    const MIN_FS = 9;             // 文字サイズの下限（これ以下は自動改行に切替）
     const p = $('inProject').value, w = $('inWork').value, m = $('inMemo').value;
-    $('bProject').textContent = p || '　';
-    $('bProject').style.fontSize = fitSize(p, valW, 12, 7) + 'px';
-    $('bWork').textContent = w || '　';
-    $('bWork').style.fontSize = fitSize(w, valW, 12, 7) + 'px';
-    // 撮影内容：改行ごとに測り、全行が収まるサイズに統一
+
+    const applyFit = (el, text, maxW) => {
+      el.textContent = text || '　';
+      const fs = fitSize(text, maxW, 12, MIN_FS);
+      el.style.fontSize = fs + 'px';
+      // 下限でも収まらない場合は自動改行に切り替える
+      measCtx.font = `${fs}px "Hiragino Sans", sans-serif`;
+      const over = measCtx.measureText(text || '').width > maxW;
+      el.style.whiteSpace = over ? 'normal' : 'nowrap';
+      el.style.wordBreak = over ? 'break-all' : 'normal';
+    };
+    applyFit($('bProject'), p, valW);
+    applyFit($('bWork'), w, valW);
+
+    // 撮影内容：改行ごとに測り、全行が収まるサイズに統一。下限を超えたら自動改行
     const lines = (m || '　').split('\n');
     let ms = 12;
-    lines.forEach(line => { ms = Math.min(ms, fitSize(line, memoW, 12, 7)); });
+    lines.forEach(line => { ms = Math.min(ms, fitSize(line, memoW, 12, MIN_FS)); });
+    measCtx.font = `${ms}px "Hiragino Sans", sans-serif`;
+    const memoOver = lines.some(line => measCtx.measureText(line).width > memoW);
     $('bMemo').textContent = m || '　';
     $('bMemo').style.fontSize = ms + 'px';
+    $('bMemo').style.whiteSpace = memoOver ? 'pre-wrap' : 'pre';
+    $('bMemo').style.wordBreak = memoOver ? 'break-all' : 'normal';
     applyBoard(); // 黒板の高さ変化に合わせて枠内に収め直す
   }
   const bind = (inputId) => {
@@ -502,12 +518,12 @@
       video.style.display = 'block';
       stillImage = null;
       mode = 'live';
-      $('modeBtn').textContent = '写真から作成';
+      $('modeBtn').textContent = '写真を選ぶ';
       $('backCamBtn').classList.add('hidden');
       hint.classList.add('hidden');
       showBoard();
     } catch (e) {
-      toast('カメラを起動できませんでした。「写真から作成」をお試しください', 3500);
+      toast('カメラを起動できませんでした。「写真を選ぶ」をお試しください', 3500);
     }
   }
   $('startCamBtn').addEventListener('click', startCamera);
@@ -780,27 +796,51 @@
     }
     return s;
   }
+  function wrapLine(ctx, text, maxW) {
+    const lines = [];
+    let line = '';
+    for (const ch of (text || '')) {
+      if (ctx.measureText(line + ch).width > maxW && line) { lines.push(line); line = ch; }
+      else line += ch;
+    }
+    lines.push(line);
+    return lines;
+  }
   function drawBoard(ctx, x, y, w) {
     const u = w / 190;                 // 1単位
     const padX = 10 * u, frame = 4 * u;
+    const fsLabel = 12 * u, fsVal = 12 * u, baseLineH = 21 * u;
+    const MIN_FS = 9 * u;              // 下限（これ以下は自動改行）
+    const memo = $('inMemo').value;
+    const valMaxW = w - padX * 2 - 58 * u;
+    const memoMaxW = w - padX * 2;
+
+    // 工事名・工種：縮小→下限に達したら自動改行
     const rows = [
       ['工事名', $('inProject').value],
       ['工　種', $('inWork').value]
-    ];
-    const fsLabel = 12 * u, fsVal = 12 * u, lineH = 21 * u;
-    const memo = $('inMemo').value;
+    ].map(([label, val]) => {
+      const vfs = fitFontCanvas(ctx, val || '', valMaxW, fsVal, MIN_FS);
+      ctx.font = `${vfs}px "Hiragino Sans", sans-serif`;
+      const vLines = wrapLine(ctx, val || '', valMaxW);
+      const rowH = Math.max(baseLineH, vLines.length * (vfs * 1.45) + 7 * u);
+      return { label, vLines, vfs, rowH };
+    });
 
-    // 撮影内容：改行ごとに測り、全行が1行で収まるサイズに統一
-    const memoMaxW = w - padX * 2;
+    // 撮影内容：手動改行を保ったまま全行共通サイズ、下限超えは自動改行
     const manualLines = (memo || '　').split('\n');
     let memoFs = fsVal;
     manualLines.forEach(line => {
-      memoFs = Math.min(memoFs, fitFontCanvas(ctx, line, memoMaxW, fsVal, 7 * u));
+      memoFs = Math.min(memoFs, fitFontCanvas(ctx, line, memoMaxW, fsVal, MIN_FS));
     });
+    ctx.font = `${memoFs}px "Hiragino Sans", sans-serif`;
+    const memoLines = [];
+    manualLines.forEach(line => memoLines.push(...wrapLine(ctx, line, memoMaxW)));
     const memoLineH = memoFs * 1.5;
-    const memoH = Math.max(46 * u, manualLines.length * memoLineH + 8 * u);
+    const memoH = Math.max(46 * u, memoLines.length * memoLineH + 8 * u);
     const companyH = 20 * u;
-    const h = 8 * u + rows.length * lineH + memoH + companyH + 8 * u;
+    const rowsH = rows.reduce((sum, r) => sum + r.rowH, 0);
+    const h = 8 * u + rowsH + memoH + companyH + 8 * u;
 
     // 枠と地
     ctx.fillStyle = '#d8d3c4';
@@ -808,18 +848,20 @@
     ctx.fillStyle = '#0d5938';
     ctx.fillRect(x, y, w, h);
 
-    // 行（工事名・工種：1行で収まるよう自動縮小）
+    // 行（工事名・工種）
     ctx.textBaseline = 'middle';
-    const valMaxW = w - padX * 2 - 58 * u;
     let cy = y + 8 * u;
-    rows.forEach(([label, val]) => {
+    rows.forEach(r => {
       ctx.fillStyle = '#fff';
       ctx.font = `bold ${fsLabel}px "Hiragino Sans", sans-serif`;
-      ctx.fillText(label, x + padX, cy + lineH / 2);
-      const vfs = fitFontCanvas(ctx, val || '', valMaxW, fsVal, 7 * u);
-      ctx.font = `${vfs}px "Hiragino Sans", sans-serif`;
-      ctx.fillText(val || '', x + padX + 58 * u, cy + lineH / 2);
-      cy += lineH;
+      ctx.fillText(r.label, x + padX, cy + Math.min(r.rowH, baseLineH) / 2);
+      ctx.font = `${r.vfs}px "Hiragino Sans", sans-serif`;
+      let vy = cy + (r.vfs * 1.45) / 2 + 3 * u;
+      r.vLines.forEach(line => {
+        ctx.fillText(line, x + padX + 58 * u, vy);
+        vy += r.vfs * 1.45;
+      });
+      cy += r.rowH;
       ctx.strokeStyle = 'rgba(255,255,255,.55)';
       ctx.lineWidth = 1 * u;
       ctx.beginPath(); ctx.moveTo(x + padX, cy); ctx.lineTo(x + w - padX, cy); ctx.stroke();
@@ -829,7 +871,7 @@
     ctx.fillStyle = '#fff';
     ctx.font = `${memoFs}px "Hiragino Sans", sans-serif`;
     let my = cy + 6 * u + memoFs * 0.75;
-    manualLines.forEach(line => {
+    memoLines.forEach(line => {
       ctx.fillText(line, x + padX, my);
       my += memoLineH;
     });
