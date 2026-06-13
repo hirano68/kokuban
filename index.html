@@ -220,6 +220,11 @@
     background: rgba(0,0,0,.7); color: #fff;
     border: 1px solid rgba(255,255,255,.4); border-radius: 8px;
   }
+  .shotItem .shotBadge {
+    position: absolute; top: 4px; left: 4px;
+    padding: 4px 8px; font-size: 11px; font-weight: 700;
+    background: rgba(0,0,0,.6); color: #fff; border-radius: 6px;
+  }
   #listCtrl {
     display: flex; align-items: center; justify-content: center; gap: 14px;
     padding: 8px 14px 0;
@@ -341,12 +346,24 @@
     pointer-events: none;
   }
   #shotHint b { color: var(--accent); }
+
+  /* ---------- 撮影プレビュー中央表示 ---------- */
+  #centerToast {
+    position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    z-index: 9997; display: none;
+    background: rgba(0,0,0,.72); color: #fff;
+    padding: 18px 24px; border-radius: 14px;
+    font-size: 16px; font-weight: 600; text-align: center; line-height: 1.6;
+    pointer-events: none; white-space: nowrap;
+  }
+  #centerToast .ct-sub { font-size: 13px; font-weight: 400; margin-top: 6px; color: #e8e8e8; }
+  #centerToast .ct-sub b { color: var(--accent); }
 </style>
 </head>
 <body>
 
 <header>
-  <h1><span>■</span>工事黒板カメラ<span class="ver">v2.8</span></h1>
+  <h1><span>■</span>工事黒板カメラ<span class="ver">v3.0</span></h1>
   <div>
     <button id="backCamBtn" class="hidden">📷 カメラへ</button>
     <button id="modeBtn">写真を選ぶ</button>
@@ -446,6 +463,10 @@
 
 <canvas id="inkCanvas"></canvas>
 <div id="shotHint">撮影しました。<b>画面をタップ</b>すると書込み編集できます<br>（<b id="shotCount">3</b>秒後に自動保存）</div>
+<div id="centerToast">
+  <div>📷 撮影しました</div>
+  <div class="ct-sub"><b>画面をタップ</b>で書込み編集　／　<b id="ctCount">3</b>秒後に自動保存</div>
+</div>
 
 <div id="picker">
   <div id="pickerSheet">
@@ -1012,10 +1033,23 @@
     if (srcRatio > frameRatio) { cropH = srcH; cropW = srcH * frameRatio; cropX = (srcW - cropW) / 2; cropY = 0; }
     else { cropW = srcW; cropH = srcW / frameRatio; cropX = 0; cropY = (srcH - cropH) / 2; }
 
+    // ベース画像（黒板・メモなし）を作成
+    const baseCanvas = document.createElement('canvas');
+    baseCanvas.width = OUT_W; baseCanvas.height = OUT_H;
+    const baseCtx = baseCanvas.getContext('2d');
+    draw(baseCtx, cropX, cropY, cropW, cropH);
+
+    // ライブ撮影時は、黒板なしの元写真も保存待ちに追加（元画像を残す）
+    if (mode === 'live') {
+      const baseURL = baseCanvas.toDataURL('image/jpeg', 0.92);
+      shots.push({ dataURL: baseURL, blob: dataURLtoBlob(baseURL), original: true });
+    }
+
+    // 合成版（黒板・メモ入り）を作成
     const canvas = document.createElement('canvas');
     canvas.width = OUT_W; canvas.height = OUT_H;
     const ctx = canvas.getContext('2d');
-    draw(ctx, cropX, cropY, cropW, cropH);
+    ctx.drawImage(baseCanvas, 0, 0);
 
     const k = OUT_W / r.width;
     if (tool === 'board') {
@@ -1030,51 +1064,46 @@
     const dataURL = canvas.toDataURL('image/jpeg', 0.92);
     shots.push({ dataURL: dataURL, blob: dataURLtoBlob(dataURL) });
     updateBatch();
-    toast(`保存待ちに追加しました（${shots.length}枚）`);
-  }
-
-  // ライブ映像の現在フレームを静止画として取り込み、編集できる状態にする
-  function freezeLiveFrame() {
-    const c = document.createElement('canvas');
-    c.width = video.videoWidth; c.height = video.videoHeight;
-    c.getContext('2d').drawImage(video, 0, 0);
-    const img = new Image();
-    img.onload = () => {
-      stillImage = img;
-      stillImg.src = c.toDataURL('image/jpeg', 0.92);
-      stillImg.style.display = 'block';
-      video.style.display = 'none';
-      if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
-      mode = 'still';
-      $('modeBtn').textContent = '別の写真を選ぶ';
-      $('backCamBtn').classList.remove('hidden');
-      showBoard(); layoutAnn();
-      toast('編集できます。黒板・メモ・書込みを追加してシャッターで保存');
-    };
-    img.src = c.toDataURL('image/jpeg', 0.92);
+    toast(mode === 'live'
+      ? `保存待ちに追加（元写真＋黒板の2枚／計${shots.length}枚）`
+      : `保存待ちに追加しました（${shots.length}枚）`);
   }
 
   /* ---------- シャッター ---------- */
-  let previewTimer = null, previewCount = 0;
+  let previewTimer = null, previewCount = 0, previewFrozen = false;
   function cancelPreview() {
     if (previewTimer) { clearInterval(previewTimer); previewTimer = null; }
     $('shotHint').style.display = 'none';
+    $('centerToast').style.display = 'none';
+    previewFrozen = false;
+  }
+  // ライブ映像の現在フレームを画面に静止表示（プレビュー用、カメラは止めない）
+  function showFrozenPreview() {
+    const c = document.createElement('canvas');
+    c.width = video.videoWidth; c.height = video.videoHeight;
+    c.getContext('2d').drawImage(video, 0, 0);
+    stillImg.src = c.toDataURL('image/jpeg', 0.92);
+    stillImg.style.display = 'block';
+    video.style.display = 'none';
+    previewFrozen = true;
   }
   $('shutter').addEventListener('click', () => {
     if (mode === 'live') {
       if (!stream || !video.videoWidth) { toast('先にカメラを起動してください'); return; }
-      // 撮影プレビュー：3秒以内にタップで編集、無操作なら自動保存
       cancelPreview();
+      // 撮影した瞬間の画像を静止表示（読んでいる間に映像が動かない）
+      showFrozenPreview();
       previewCount = 3;
-      $('shotCount').textContent = previewCount;
-      $('shotHint').style.display = 'block';
+      $('ctCount').textContent = previewCount;
+      $('centerToast').style.display = 'block';
       previewTimer = setInterval(() => {
         previewCount -= 1;
         if (previewCount <= 0) {
           cancelPreview();
-          commitShot(); // 無操作 → そのまま保存待ちへ
+          commitShot();           // 無操作 → そのまま保存待ちへ
+          startCamera();          // ライブに戻す
         } else {
-          $('shotCount').textContent = previewCount;
+          $('ctCount').textContent = previewCount;
         }
       }, 1000);
     } else {
@@ -1083,11 +1112,24 @@
     }
   });
 
-  // プレビュー中に画面タップ → 撮影フレームを固定して編集モードへ
+  // プレビュー中に画面タップ → そのフレームを確定して編集モードへ
   $('stage').addEventListener('click', () => {
     if (previewTimer) {
+      const dataURL = stillImg.src;
       cancelPreview();
-      freezeLiveFrame();
+      const img = new Image();
+      img.onload = () => {
+        stillImage = img;
+        if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+        stillImg.style.display = 'block';
+        video.style.display = 'none';
+        mode = 'still';
+        $('modeBtn').textContent = '別の写真を選ぶ';
+        $('backCamBtn').classList.remove('hidden');
+        showBoard(); layoutAnn();
+        toast('編集できます。黒板・メモ・書込みを追加してシャッターで保存', 2600);
+      };
+      img.src = dataURL;
     }
   });
 
@@ -1122,6 +1164,12 @@
         toast(`削除しました（残り ${shots.length}枚）`);
       });
       item.appendChild(img);
+      if (s.original) {
+        const badge = document.createElement('div');
+        badge.className = 'shotBadge';
+        badge.textContent = '元画像';
+        item.appendChild(badge);
+      }
       item.appendChild(del);
       list.appendChild(item);
     });
