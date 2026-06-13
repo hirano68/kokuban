@@ -363,7 +363,7 @@
 <body>
 
 <header>
-  <h1><span>■</span>工事黒板カメラ<span class="ver">v3.1</span></h1>
+  <h1><span>■</span>工事黒板カメラ<span class="ver">v3.2</span></h1>
   <div>
     <button id="backCamBtn" class="hidden">📷 カメラへ</button>
     <button id="modeBtn">写真を選ぶ</button>
@@ -486,6 +486,7 @@
   let mode = 'live';          // 'live' | 'still'
   let stream = null;
   let stillImage = null;      // 写真モードで読み込んだ Image
+  let fromCamera = false;     // この画像がカメラ撮影由来か（元画像を残すかの判定）
   let scale = 1.0;
   let pos = null;             // 黒板の左上位置（stage内px）
 
@@ -624,6 +625,7 @@
       stillImg.style.display = 'none';
       video.style.display = 'block';
       stillImage = null;
+      fromCamera = false;
       mode = 'live';
       $('modeBtn').textContent = '写真を選ぶ';
       $('backCamBtn').classList.add('hidden');
@@ -654,6 +656,7 @@
         video.style.display = 'none';
         if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
         mode = 'still';
+        fromCamera = false; // ライブラリの写真は元がすでに端末にある
         $('modeBtn').textContent = '別の写真を選ぶ';
         $('backCamBtn').classList.remove('hidden');
         hint.classList.add('hidden');
@@ -1039,8 +1042,9 @@
     const baseCtx = baseCanvas.getContext('2d');
     draw(baseCtx, cropX, cropY, cropW, cropH);
 
-    // ライブ撮影時は、黒板なしの元写真も保存待ちに追加（元画像を残す）
-    if (mode === 'live') {
+    // カメラ由来の撮影なら、黒板なしの元写真も保存待ちに追加（元画像を残す）
+    // fromCamera: ライブ撮影 or プレビューから編集に入った写真
+    if (fromCamera) {
       const baseURL = baseCanvas.toDataURL('image/jpeg', 0.92);
       shots.push({ dataURL: baseURL, blob: dataURLtoBlob(baseURL), original: true });
     }
@@ -1064,8 +1068,8 @@
     const dataURL = canvas.toDataURL('image/jpeg', 0.92);
     shots.push({ dataURL: dataURL, blob: dataURLtoBlob(dataURL) });
     updateBatch();
-    toast(mode === 'live'
-      ? `保存待ちに追加（元写真＋黒板の2枚／計${shots.length}枚）`
+    toast(fromCamera
+      ? `保存待ちに追加（元写真＋書込みの2枚／計${shots.length}枚）`
       : `保存待ちに追加しました（${shots.length}枚）`);
   }
 
@@ -1103,6 +1107,7 @@
       stillImg.style.display = 'block';
       video.style.display = 'none';
       mode = 'still';
+      fromCamera = true; // カメラ撮影をプレビューから編集 → 元画像を残す
       $('modeBtn').textContent = '別の写真を選ぶ';
       $('backCamBtn').classList.remove('hidden');
       showBoard(); layoutAnn();
@@ -1122,6 +1127,7 @@
     if (mode === 'live') {
       if (!stream || !video.videoWidth) { toast('先にカメラを起動してください'); return; }
       cancelPreview();
+      fromCamera = true; // カメラ撮影 → 元画像を残す
       // 撮影した瞬間の画像を静止表示（読んでいる間に映像が動かない）
       showFrozenPreview();
       // プレビュー中はペン入力を一時無効化（タップが編集切替に届くように）
