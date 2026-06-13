@@ -330,12 +330,23 @@
     pointer-events: none; display: none;
     touch-action: none;
   }
+
+  /* ---------- 撮影直後プレビュー ---------- */
+  #shotHint {
+    position: fixed; left: 50%; bottom: 130px; transform: translateX(-50%);
+    z-index: 9996; display: none;
+    background: rgba(0,0,0,.78); color: #fff;
+    padding: 10px 16px; border-radius: 12px;
+    font-size: 13px; text-align: center; line-height: 1.5;
+    pointer-events: none; white-space: nowrap;
+  }
+  #shotHint b { color: var(--accent); }
 </style>
 </head>
 <body>
 
 <header>
-  <h1><span>■</span>工事黒板カメラ<span class="ver">v2.5</span></h1>
+  <h1><span>■</span>工事黒板カメラ<span class="ver">v2.6</span></h1>
   <div>
     <button id="backCamBtn" class="hidden">📷 カメラへ</button>
     <button id="modeBtn">写真を選ぶ</button>
@@ -434,6 +445,7 @@
 </div>
 
 <canvas id="inkCanvas"></canvas>
+<div id="shotHint">撮影しました。<b>画面をタップ</b>すると書込み編集できます<br>（<b id="shotCount">3</b>秒後に自動保存）</div>
 
 <div id="picker">
   <div id="pickerSheet">
@@ -575,6 +587,7 @@
 
   /* ---------- カメラ起動 ---------- */
   async function startCamera() {
+    cancelPreview && cancelPreview();
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
@@ -976,10 +989,10 @@
 
   /* ---------- 撮影・合成 ---------- */
   const OUT_W = 1280, OUT_H = 960; // 出力サイズ固定（4:3横・約120万画素：工事写真標準）
-  $('shutter').addEventListener('click', () => {
+  /* ---------- 合成して保存待ちに追加 ---------- */
+  function commitShot() {
     const r = frame.getBoundingClientRect();
     let srcW, srcH, draw;
-
     if (mode === 'live') {
       if (!stream || !video.videoWidth) { toast('先にカメラを起動してください'); return; }
       srcW = video.videoWidth; srcH = video.videoHeight;
@@ -989,9 +1002,7 @@
       srcW = stillImage.naturalWidth; srcH = stillImage.naturalHeight;
       draw = (ctx, cropX, cropY, cw, ch) => ctx.drawImage(stillImage, cropX, cropY, cw, ch, 0, 0, OUT_W, OUT_H);
     }
-
-    // 画面の見た目（4:3枠・object-fit: cover）と同じ範囲を切り取る
-    const frameRatio = OUT_W / OUT_H; // = 4:3
+    const frameRatio = OUT_W / OUT_H;
     const srcRatio = srcW / srcH;
     let cropW, cropH, cropX, cropY;
     if (srcRatio > frameRatio) { cropH = srcH; cropW = srcH * frameRatio; cropX = (srcW - cropW) / 2; cropY = 0; }
@@ -1002,7 +1013,6 @@
     const ctx = canvas.getContext('2d');
     draw(ctx, cropX, cropY, cropW, cropH);
 
-    // モードに応じて合成（画面px → 写真px の倍率）
     const k = OUT_W / r.width;
     if (tool === 'board') {
       drawBoard(ctx, pos.x * k, pos.y * k, 190 * scale * k);
@@ -1016,7 +1026,65 @@
     const dataURL = canvas.toDataURL('image/jpeg', 0.92);
     shots.push({ dataURL: dataURL, blob: dataURLtoBlob(dataURL) });
     updateBatch();
-    toast(`撮影しました（保存待ち ${shots.length}枚）`);
+    toast(`保存待ちに追加しました（${shots.length}枚）`);
+  }
+
+  // ライブ映像の現在フレームを静止画として取り込み、編集できる状態にする
+  function freezeLiveFrame() {
+    const c = document.createElement('canvas');
+    c.width = video.videoWidth; c.height = video.videoHeight;
+    c.getContext('2d').drawImage(video, 0, 0);
+    const img = new Image();
+    img.onload = () => {
+      stillImage = img;
+      stillImg.src = c.toDataURL('image/jpeg', 0.92);
+      stillImg.style.display = 'block';
+      video.style.display = 'none';
+      if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+      mode = 'still';
+      $('modeBtn').textContent = '別の写真を選ぶ';
+      $('backCamBtn').classList.remove('hidden');
+      showBoard(); layoutAnn();
+      toast('編集できます。黒板・メモ・書込みを追加してシャッターで保存');
+    };
+    img.src = c.toDataURL('image/jpeg', 0.92);
+  }
+
+  /* ---------- シャッター ---------- */
+  let previewTimer = null, previewCount = 0;
+  function cancelPreview() {
+    if (previewTimer) { clearInterval(previewTimer); previewTimer = null; }
+    $('shotHint').style.display = 'none';
+  }
+  $('shutter').addEventListener('click', () => {
+    if (mode === 'live') {
+      if (!stream || !video.videoWidth) { toast('先にカメラを起動してください'); return; }
+      // 撮影プレビュー：3秒以内にタップで編集、無操作なら自動保存
+      cancelPreview();
+      previewCount = 3;
+      $('shotCount').textContent = previewCount;
+      $('shotHint').style.display = 'block';
+      previewTimer = setInterval(() => {
+        previewCount -= 1;
+        if (previewCount <= 0) {
+          cancelPreview();
+          commitShot(); // 無操作 → そのまま保存待ちへ
+        } else {
+          $('shotCount').textContent = previewCount;
+        }
+      }, 1000);
+    } else {
+      // 写真モード（編集中）：そのまま保存待ちへ
+      commitShot();
+    }
+  });
+
+  // プレビュー中に画面タップ → 撮影フレームを固定して編集モードへ
+  $('stage').addEventListener('click', () => {
+    if (previewTimer) {
+      cancelPreview();
+      freezeLiveFrame();
+    }
   });
 
   /* ---------- 保存待ちリスト ---------- */
