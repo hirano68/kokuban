@@ -363,7 +363,7 @@
 <body>
 
 <header>
-  <h1><span>■</span>工事黒板カメラ<span class="ver">v3.0</span></h1>
+  <h1><span>■</span>工事黒板カメラ<span class="ver">v3.1</span></h1>
   <div>
     <button id="backCamBtn" class="hidden">📷 カメラへ</button>
     <button id="modeBtn">写真を選ぶ</button>
@@ -1076,6 +1076,11 @@
     $('shotHint').style.display = 'none';
     $('centerToast').style.display = 'none';
     previewFrozen = false;
+    window.removeEventListener('click', previewTapHandler, true);
+    window.removeEventListener('touchstart', previewTapHandler, true);
+    // ペン状態に応じてポインタ操作を元に戻す
+    inkCanvas.style.pointerEvents = penOn ? 'auto' : 'none';
+    document.querySelectorAll('.bubble').forEach(el => el.style.pointerEvents = '');
   }
   // ライブ映像の現在フレームを画面に静止表示（プレビュー用、カメラは止めない）
   function showFrozenPreview() {
@@ -1087,12 +1092,45 @@
     video.style.display = 'none';
     previewFrozen = true;
   }
+  // プレビュー中のタップ → そのフレームを確定して編集モードへ
+  function enterEditFromPreview() {
+    const dataURL = stillImg.src;
+    cancelPreview();
+    const img = new Image();
+    img.onload = () => {
+      stillImage = img;
+      if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+      stillImg.style.display = 'block';
+      video.style.display = 'none';
+      mode = 'still';
+      $('modeBtn').textContent = '別の写真を選ぶ';
+      $('backCamBtn').classList.remove('hidden');
+      showBoard(); layoutAnn();
+      toast('編集できます。黒板・メモ・書込みを追加してシャッターで保存', 2600);
+    };
+    img.src = dataURL;
+  }
+  // プレビュー中だけ、画面全体のタップを最優先で拾う（メモタブのペン/吹き出しに邪魔されないように）
+  function previewTapHandler(e) {
+    if (!previewTimer) return;
+    if (e.target && e.target.closest && e.target.closest('#shutter')) return; // シャッター操作は除外
+    e.preventDefault();
+    e.stopPropagation();
+    enterEditFromPreview();
+  }
   $('shutter').addEventListener('click', () => {
     if (mode === 'live') {
       if (!stream || !video.videoWidth) { toast('先にカメラを起動してください'); return; }
       cancelPreview();
       // 撮影した瞬間の画像を静止表示（読んでいる間に映像が動かない）
       showFrozenPreview();
+      // プレビュー中はペン入力を一時無効化（タップが編集切替に届くように）
+      inkCanvas.style.pointerEvents = 'none';
+      document.querySelectorAll('.bubble').forEach(el => el.style.pointerEvents = 'none');
+      setTimeout(() => {
+        window.addEventListener('click', previewTapHandler, true);
+        window.addEventListener('touchstart', previewTapHandler, true);
+      }, 350);
       previewCount = 3;
       $('ctCount').textContent = previewCount;
       $('centerToast').style.display = 'block';
@@ -1109,27 +1147,6 @@
     } else {
       // 写真モード（編集中）：そのまま保存待ちへ
       commitShot();
-    }
-  });
-
-  // プレビュー中に画面タップ → そのフレームを確定して編集モードへ
-  $('stage').addEventListener('click', () => {
-    if (previewTimer) {
-      const dataURL = stillImg.src;
-      cancelPreview();
-      const img = new Image();
-      img.onload = () => {
-        stillImage = img;
-        if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
-        stillImg.style.display = 'block';
-        video.style.display = 'none';
-        mode = 'still';
-        $('modeBtn').textContent = '別の写真を選ぶ';
-        $('backCamBtn').classList.remove('hidden');
-        showBoard(); layoutAnn();
-        toast('編集できます。黒板・メモ・書込みを追加してシャッターで保存', 2600);
-      };
-      img.src = dataURL;
     }
   });
 
