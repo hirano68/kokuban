@@ -235,6 +235,7 @@
     background: var(--panel); color: var(--text); font-size: 18px;
   }
   #listCtrl span { font-size: 13px; color: var(--text-dim); min-width: 56px; text-align: center; }
+  #undoDelBtn { width: auto !important; padding: 0 12px !important; font-size: 13px !important; color: var(--accent) !important; border-color: var(--accent) !important; }
 
   #controls {
     display: flex; align-items: center; justify-content: space-between;
@@ -308,6 +309,8 @@
     background: var(--bg); color: var(--text);
   }
   #memoTools #penBtn.active { background: var(--danger); border-color: var(--danger); color: #fff; }
+  #memoTools #markerBtn.active { background: #d8b400; border-color: #d8b400; color: #1a1a1a; }
+  #memoTools #eraserBtn.active { background: #4a90d9; border-color: #4a90d9; color: #fff; }
   .inkColor { width: 34px; height: 34px; border-radius: 50% !important; padding: 0 !important; border: 2px solid var(--line) !important; }
   .inkColor.active { border-color: #fff !important; box-shadow: 0 0 0 2px var(--accent); }
 
@@ -363,7 +366,7 @@
 <body>
 
 <header>
-  <h1><span>■</span>工事黒板カメラ<span class="ver">v3.2</span></h1>
+  <h1><span>■</span>工事黒板カメラ<span class="ver">v3.4</span></h1>
   <div>
     <button id="backCamBtn" class="hidden">📷 カメラへ</button>
     <button id="modeBtn">写真を選ぶ</button>
@@ -419,8 +422,9 @@
     </div>
     <div id="memoTools">
       <button id="addBubbleBtn">＋吹き出し</button>
-      <button id="delBubbleBtn">削除</button>
       <button id="penBtn">🖊 ペン</button>
+      <button id="markerBtn">🖍 マーカー</button>
+      <button id="eraserBtn">消しゴム</button>
       <button class="inkColor active" data-color="#e0312d" style="background:#e0312d" aria-label="赤"></button>
       <button class="inkColor" data-color="#ffd400" style="background:#ffd400" aria-label="黄"></button>
       <button class="inkColor" data-color="#ffffff" style="background:#ffffff" aria-label="白"></button>
@@ -442,6 +446,7 @@
     <button id="colBig">拡大</button>
     <span id="colLabel">1列</span>
     <button id="colSmall">縮小</button>
+    <button id="undoDelBtn" class="hidden">↩ 削除を取消</button>
   </div>
   <div class="rTop" id="resultList"></div>
   <div id="resultNote">保存できない場合は、各画像を長押し →「写真に追加」でも保存できます</div>
@@ -489,6 +494,14 @@
   let fromCamera = false;     // この画像がカメラ撮影由来か（元画像を残すかの判定）
   let scale = 1.0;
   let pos = null;             // 黒板の左上位置（stage内px）
+  // 編集中の写真ズーム/パン（still時に有効）
+  let photoZoom = 1, photoTX = 0, photoTY = 0;
+  function resetPhotoZoom() { photoZoom = 1; photoTX = 0; photoTY = 0; applyPhotoTransform(); }
+  function applyPhotoTransform() {
+    stillImg.style.transformOrigin = 'center center';
+    stillImg.style.transform = `translate(${photoTX}px, ${photoTY}px) scale(${photoZoom})`;
+    if (typeof redrawInk === 'function') redrawInk();
+  }
 
   /* ---------- 入力欄 → 黒板へ反映 ---------- */
   // 文字サイズ自動調整用の測定キャンバス
@@ -535,6 +548,8 @@
   }
   const bind = (inputId) => {
     $(inputId).addEventListener('input', refreshBoardText);
+    // 入力確定（フォーカスを外した）時点で登録リストへ保存
+    $(inputId).addEventListener('blur', () => addHist(inputId, $(inputId).value));
   };
   bind('inProject');
   bind('inWork');
@@ -551,6 +566,9 @@
   function saveHist() {
     try { localStorage.setItem(HIST_KEY, JSON.stringify(hist)); } catch (e) {}
   }
+  // アプリ終了・バックグラウンド移行の直前にも保存（iOSでの取りこぼし対策）
+  window.addEventListener('pagehide', saveHist);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveHist(); });
   function addHist(fieldId, value) {
     value = (value || '').trim();
     if (!value || !hist[fieldId]) return;
@@ -627,6 +645,8 @@
       stillImage = null;
       fromCamera = false;
       mode = 'live';
+      clearAnnotations();
+      resetPhotoZoom();
       $('modeBtn').textContent = '写真を選ぶ';
       $('backCamBtn').classList.add('hidden');
       hint.classList.add('hidden');
@@ -657,6 +677,8 @@
         if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
         mode = 'still';
         fromCamera = false; // ライブラリの写真は元がすでに端末にある
+        clearAnnotations();
+        resetPhotoZoom();
         $('modeBtn').textContent = '別の写真を選ぶ';
         $('backCamBtn').classList.remove('hidden');
         hint.classList.add('hidden');
@@ -753,7 +775,14 @@
   let bubbles = [];      // {x, y(枠内の比率), scale, text, el}
   let selBubble = null;
   function addBubble(text) {
-    const b = { x: 0.3, y: 0.25, scale: 1, text: text || 'メモ', el: null };
+    // 既存の吹き出しと重ならないよう、段階的にずらして配置（はみ出したら折り返す）
+    const n = bubbles.length;
+    const stepX = 0.12, stepY = 0.11;
+    let x = 0.18 + (n % 4) * stepX + (Math.random() * 0.04 - 0.02);
+    let y = 0.15 + (Math.floor(n / 4) % 3) * stepY + (n % 2) * 0.05 + (Math.random() * 0.04 - 0.02);
+    x = Math.min(Math.max(x, 0.04), 0.7);
+    y = Math.min(Math.max(y, 0.05), 0.8);
+    const b = { x: x, y: y, scale: 1, text: text || 'メモ', el: null };
     const el = document.createElement('div');
     el.className = 'bubble';
     document.body.appendChild(el);
@@ -807,13 +836,6 @@
     });
   }
   $('addBubbleBtn').addEventListener('click', () => addBubble($('inBubble').value.trim() || 'メモ'));
-  $('delBubbleBtn').addEventListener('click', () => {
-    if (!selBubble) { toast('削除する吹き出しをタップで選んでください'); return; }
-    selBubble.el.remove();
-    bubbles = bubbles.filter(b => b !== selBubble);
-    selectBubble(null);
-    toast('吹き出しを削除しました');
-  });
   $('inBubble').addEventListener('input', () => {
     if (!selBubble) {
       if ($('inBubble').value.trim()) addBubble($('inBubble').value);
@@ -825,18 +847,41 @@
   });
 
   /* ---------- ペン書込み ---------- */
-  let penOn = false, inkColor = '#e0312d', strokes = [];
+  let penOn = false, eraserOn = false, markerOn = false, inkColor = '#e0312d', strokes = [];
+  let photoPinch = null, photoPan = null;
+  const tdist = ts => Math.hypot(ts[0].clientX - ts[1].clientX, ts[0].clientY - ts[1].clientY);
   $('penBtn').addEventListener('click', () => {
     penOn = !penOn;
+    if (penOn) { markerOn = false; eraserOn = false; $('markerBtn').classList.remove('active'); $('eraserBtn').classList.remove('active'); }
     $('penBtn').classList.toggle('active', penOn);
-    inkCanvas.style.pointerEvents = penOn ? 'auto' : 'none';
+    inkCanvas.style.pointerEvents = (penOn || markerOn || eraserOn) ? 'auto' : 'none';
     toast(penOn ? 'ペンON：指でなぞって書込みできます' : 'ペンOFF');
+  });
+  $('markerBtn').addEventListener('click', () => {
+    markerOn = !markerOn;
+    if (markerOn) { penOn = false; eraserOn = false; $('penBtn').classList.remove('active'); $('eraserBtn').classList.remove('active'); }
+    $('markerBtn').classList.toggle('active', markerOn);
+    inkCanvas.style.pointerEvents = (penOn || markerOn || eraserOn) ? 'auto' : 'none';
+    toast(markerOn ? 'マーカーON：蛍光ペンで強調できます' : 'マーカーOFF');
+  });
+  $('eraserBtn').addEventListener('click', () => {
+    eraserOn = !eraserOn;
+    if (eraserOn) { penOn = false; markerOn = false; $('penBtn').classList.remove('active'); $('markerBtn').classList.remove('active'); }
+    $('eraserBtn').classList.toggle('active', eraserOn);
+    inkCanvas.style.pointerEvents = (penOn || markerOn || eraserOn) ? 'auto' : 'none';
+    toast(eraserOn ? '消しゴムON：書込みをなぞって消します' : '消しゴムOFF');
   });
   document.querySelectorAll('.inkColor').forEach(btn => {
     btn.addEventListener('click', () => {
       inkColor = btn.dataset.color;
       document.querySelectorAll('.inkColor').forEach(x => x.classList.remove('active'));
       btn.classList.add('active');
+      // 色を選んだら描画モードへ（消しゴム解除）。マーカー選択中はマーカーのまま
+      if (eraserOn) {
+        eraserOn = false; $('eraserBtn').classList.remove('active');
+        if (!markerOn) { penOn = true; $('penBtn').classList.add('active'); }
+        inkCanvas.style.pointerEvents = 'auto';
+      }
     });
   });
   $('undoInkBtn').addEventListener('click', () => {
@@ -844,37 +889,148 @@
     strokes.pop();
     redrawInk();
   });
+  // 消しゴム：指の位置に近いストローク／吹き出しを消す（座標は写真座標で受け取る）
+  function eraseAt(nx, ny) {
+    const thr = 0.035; // 反応半径（写真座標基準）
+    let removed = false;
+    strokes = strokes.filter(s => {
+      const hit = s.pts.some(p => Math.hypot(p.x - nx, p.y - ny) < thr);
+      if (hit) removed = true;
+      return !hit;
+    });
+    // 吹き出しの判定は画面座標で行う（吹き出しは画面位置で保持）
+    const sp = photoToScreen(nx, ny);
+    const r = frame.getBoundingClientRect();
+    const remain = [];
+    bubbles.forEach(b => {
+      // 吹き出しの占有範囲（画面比率）にカーソルが入っていれば消す
+      const bw = (b.el.offsetWidth * b.scale) / r.width;
+      const bh = (b.el.offsetHeight * b.scale) / r.height;
+      const inside = sp.x >= b.x - 0.02 && sp.x <= b.x + bw + 0.02 &&
+                     sp.y >= b.y - 0.02 && sp.y <= b.y + bh + 0.02;
+      if (inside) { b.el.remove(); removed = true; if (selBubble === b) selBubble = null; }
+      else remain.push(b);
+    });
+    bubbles = remain;
+    if (removed) redrawInk();
+  }
+  /* ---------- 画面座標 ⇔ 写真座標の変換（ズーム/パンに連動） ---------- */
+  // 画面上の正規化座標(0..1) → 写真そのものの正規化座標(0..1)
+  function screenToPhoto(nx, ny) {
+    const r = frame.getBoundingClientRect();
+    const px = 0.5 + (nx - 0.5 - photoTX / r.width) / photoZoom;
+    const py = 0.5 + (ny - 0.5 - photoTY / r.height) / photoZoom;
+    return { x: px, y: py };
+  }
+  // 写真座標(0..1) → 画面上の正規化座標(0..1)
+  function photoToScreen(px, py) {
+    const r = frame.getBoundingClientRect();
+    const nx = 0.5 + (px - 0.5) * photoZoom + photoTX / r.width;
+    const ny = 0.5 + (py - 0.5) * photoZoom + photoTY / r.height;
+    return { x: nx, y: ny };
+  }
+
   let curStroke = null;
   inkCanvas.addEventListener('touchstart', e => {
+    // ペン/消しゴム中でも2本指ならズーム開始（描画はしない）
+    if (e.touches.length === 2 && mode === 'still') {
+      e.preventDefault();
+      photoPinch = { d: tdist(e.touches), z: photoZoom };
+      curStroke = null;
+      // 直前に追加された描きかけストロークがあれば取り消す
+      if (strokes.length && strokes[strokes.length - 1].pts.length < 2) strokes.pop();
+      redrawInk();
+      return;
+    }
     e.preventDefault();
-    if (!penOn || e.touches.length !== 1) return;
+    if (e.touches.length !== 1) return;
     const r = frame.getBoundingClientRect();
     const t = e.touches[0];
-    curStroke = { color: inkColor, pts: [{ x: (t.clientX - r.left) / r.width, y: (t.clientY - r.top) / r.height }] };
+    const sn = { x: (t.clientX - r.left) / r.width, y: (t.clientY - r.top) / r.height };
+    const p = screenToPhoto(sn.x, sn.y);  // 写真座標で記録
+    if (eraserOn) { eraseAt(p.x, p.y); return; }
+    if (!penOn && !markerOn) return;
+    // 線の太さも写真座標基準（拡大中に引くと細く＝拡大後に適正な太さ）
+    curStroke = markerOn
+      ? { color: inkColor, w: 16 / photoZoom, pts: [{ x: p.x, y: p.y }], marker: true }
+      : { color: inkColor, w: 4 / photoZoom, pts: [{ x: p.x, y: p.y }] };
     strokes.push(curStroke);
   }, { passive: false });
   inkCanvas.addEventListener('touchmove', e => {
+    if (photoPinch && e.touches.length === 2 && mode === 'still') {
+      e.preventDefault();
+      photoZoom = Math.min(4, Math.max(1, photoPinch.z * tdist(e.touches) / photoPinch.d));
+      if (photoZoom === 1) { photoTX = 0; photoTY = 0; }
+      applyPhotoTransform();
+      return;
+    }
     e.preventDefault();
-    if (!curStroke || e.touches.length !== 1) return;
+    if (e.touches.length !== 1) return;
     const r = frame.getBoundingClientRect();
     const t = e.touches[0];
-    curStroke.pts.push({ x: (t.clientX - r.left) / r.width, y: (t.clientY - r.top) / r.height });
+    const sn = { x: (t.clientX - r.left) / r.width, y: (t.clientY - r.top) / r.height };
+    const p = screenToPhoto(sn.x, sn.y);
+    if (eraserOn) { eraseAt(p.x, p.y); return; }
+    if (!curStroke) return;
+    curStroke.pts.push({ x: p.x, y: p.y });
     redrawInk();
   }, { passive: false });
-  inkCanvas.addEventListener('touchend', () => { curStroke = null; });
+  inkCanvas.addEventListener('touchend', () => { curStroke = null; photoPinch = null; });
+
+  /* ---------- 編集中の写真ピンチズーム/パン（still時） ---------- */
+  frame.addEventListener('touchstart', e => {
+    if (mode !== 'still') return;
+    // 2本指ピンチは常に有効（ペンは1本指なので両立できる）
+    if (e.touches.length === 2) {
+      e.preventDefault();
+      photoPinch = { d: tdist(e.touches), z: photoZoom };
+      photoPan = null;
+      curStroke = null; // 描きかけがあれば中断
+    } else if (e.touches.length === 1 && photoZoom > 1 && !penOn && !markerOn && !eraserOn) {
+      // 1本指パンは、ペン/マーカー/消しゴムOFFのときだけ
+      photoPan = { sx: e.touches[0].clientX, sy: e.touches[0].clientY, tx: photoTX, ty: photoTY };
+    }
+  }, { passive: false });
+  frame.addEventListener('touchmove', e => {
+    if (mode !== 'still') return;
+    if (photoPinch && e.touches.length === 2) {
+      e.preventDefault();
+      photoZoom = Math.min(4, Math.max(1, photoPinch.z * tdist(e.touches) / photoPinch.d));
+      if (photoZoom === 1) { photoTX = 0; photoTY = 0; }
+      applyPhotoTransform();
+    } else if (photoPan && e.touches.length === 1) {
+      e.preventDefault();
+      const r = frame.getBoundingClientRect();
+      const maxX = r.width * (photoZoom - 1) / 2;
+      const maxY = r.height * (photoZoom - 1) / 2;
+      photoTX = Math.min(maxX, Math.max(-maxX, photoPan.tx + e.touches[0].clientX - photoPan.sx));
+      photoTY = Math.min(maxY, Math.max(-maxY, photoPan.ty + e.touches[0].clientY - photoPan.sy));
+      applyPhotoTransform();
+    }
+  }, { passive: false });
+  frame.addEventListener('touchend', () => { photoPinch = null; photoPan = null; });
 
   function redrawInk() {
     inkCtx.clearRect(0, 0, inkCanvas.width, inkCanvas.height);
-    inkCtx.lineCap = 'round'; inkCtx.lineJoin = 'round';
     strokes.forEach(s => {
+      inkCtx.save();
+      if (s.marker) {
+        inkCtx.globalAlpha = 0.38;            // 蛍光ペンの透け感
+        inkCtx.globalCompositeOperation = 'multiply';
+        inkCtx.lineCap = 'butt'; inkCtx.lineJoin = 'round';
+      } else {
+        inkCtx.lineCap = 'round'; inkCtx.lineJoin = 'round';
+      }
       inkCtx.strokeStyle = s.color;
-      inkCtx.lineWidth = 4;
+      inkCtx.lineWidth = (s.w || 4) * photoZoom;
       inkCtx.beginPath();
       s.pts.forEach((p, i) => {
-        const px = p.x * inkCanvas.width, py = p.y * inkCanvas.height;
+        const sp = photoToScreen(p.x, p.y);
+        const px = sp.x * inkCanvas.width, py = sp.y * inkCanvas.height;
         i ? inkCtx.lineTo(px, py) : inkCtx.moveTo(px, py);
       });
       inkCtx.stroke();
+      inkCtx.restore();
     });
   }
 
@@ -900,6 +1056,22 @@
   }
   window.addEventListener('resize', layoutAnn);
 
+  // 吹き出し・ペン書込みをすべて消す（新しい画像に移るとき用）
+  function clearAnnotations() {
+    document.querySelectorAll('.bubble').forEach(el => el.remove());
+    bubbles = [];
+    selBubble = null;
+    strokes = [];
+    if (typeof $('inBubble') !== 'undefined' && $('inBubble')) $('inBubble').value = '';
+    // ペン・マーカー・消しゴムも解除
+    penOn = false; eraserOn = false; markerOn = false;
+    $('penBtn').classList.remove('active');
+    $('markerBtn').classList.remove('active');
+    $('eraserBtn').classList.remove('active');
+    inkCanvas.style.pointerEvents = 'none';
+    redrawInk();
+  }
+
   /* ---------- メモ・吹き出しを写真へ合成 ---------- */
   function roundRect(ctx, x, y, w, h, rad) {
     ctx.beginPath();
@@ -911,17 +1083,26 @@
     ctx.closePath();
   }
   function drawAnnotations(ctx, k) {
-    // ペン書込み
-    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    // ペン・マーカー書込み（写真座標 → 現在のズーム/パンを反映した画面位置で描画）
     strokes.forEach(s => {
+      ctx.save();
+      if (s.marker) {
+        ctx.globalAlpha = 0.38;
+        ctx.globalCompositeOperation = 'multiply';
+        ctx.lineCap = 'butt'; ctx.lineJoin = 'round';
+      } else {
+        ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      }
       ctx.strokeStyle = s.color;
-      ctx.lineWidth = 4 * k;
+      ctx.lineWidth = (s.w || 4) * photoZoom * k;
       ctx.beginPath();
       s.pts.forEach((p, i) => {
-        const px = p.x * OUT_W, py = p.y * OUT_H;
+        const sp = photoToScreen(p.x, p.y);
+        const px = sp.x * OUT_W, py = sp.y * OUT_H;
         i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
       });
       ctx.stroke();
+      ctx.restore();
     });
     // 吹き出し
     ctx.textBaseline = 'alphabetic';
@@ -1036,7 +1217,7 @@
     if (srcRatio > frameRatio) { cropH = srcH; cropW = srcH * frameRatio; cropX = (srcW - cropW) / 2; cropY = 0; }
     else { cropW = srcW; cropH = srcW / frameRatio; cropX = 0; cropY = (srcH - cropH) / 2; }
 
-    // ベース画像（黒板・メモなし）を作成
+    // ベース画像（黒板・メモなし・ズームなし）を作成
     const baseCanvas = document.createElement('canvas');
     baseCanvas.width = OUT_W; baseCanvas.height = OUT_H;
     const baseCtx = baseCanvas.getContext('2d');
@@ -1049,11 +1230,24 @@
       shots.push({ dataURL: baseURL, blob: dataURLtoBlob(baseURL), original: true });
     }
 
+    // 合成版の背景（写真のズーム/パンを反映）
+    const zoomedCanvas = document.createElement('canvas');
+    zoomedCanvas.width = OUT_W; zoomedCanvas.height = OUT_H;
+    const zctx = zoomedCanvas.getContext('2d');
+    if (mode === 'still' && photoZoom > 1) {
+      const sx = photoTX / r.width * OUT_W;   // 画面pxを出力pxに換算したパン量
+      const sy = photoTY / r.height * OUT_H;
+      zctx.translate(OUT_W / 2 + sx, OUT_H / 2 + sy);
+      zctx.scale(photoZoom, photoZoom);
+      zctx.translate(-OUT_W / 2, -OUT_H / 2);
+    }
+    zctx.drawImage(baseCanvas, 0, 0);
+
     // 合成版（黒板・メモ入り）を作成
     const canvas = document.createElement('canvas');
     canvas.width = OUT_W; canvas.height = OUT_H;
     const ctx = canvas.getContext('2d');
-    ctx.drawImage(baseCanvas, 0, 0);
+    ctx.drawImage(zoomedCanvas, 0, 0);
 
     const k = OUT_W / r.width;
     if (tool === 'board') {
@@ -1108,6 +1302,8 @@
       video.style.display = 'none';
       mode = 'still';
       fromCamera = true; // カメラ撮影をプレビューから編集 → 元画像を残す
+      clearAnnotations();
+      resetPhotoZoom();
       $('modeBtn').textContent = '別の写真を選ぶ';
       $('backCamBtn').classList.remove('hidden');
       showBoard(); layoutAnn();
@@ -1158,6 +1354,20 @@
 
   /* ---------- 保存待ちリスト ---------- */
   let shots = [];
+  let lastDeleted = null; // {shot, index}
+  function showUndoDelete() {
+    $('undoDelBtn').classList.toggle('hidden', !lastDeleted);
+  }
+  $('undoDelBtn').addEventListener('click', () => {
+    if (!lastDeleted) return;
+    const idx = Math.min(lastDeleted.index, shots.length);
+    shots.splice(idx, 0, lastDeleted.shot);
+    lastDeleted = null;
+    updateBatch();
+    renderList();
+    showUndoDelete();
+    toast('削除を取り消しました');
+  });
   function updateBatch() {
     $('batchCount').textContent = shots.length;
     $('batchBar').classList.toggle('hidden', shots.length === 0);
@@ -1181,10 +1391,12 @@
       del.className = 'shotDel';
       del.textContent = '削除';
       del.addEventListener('click', () => {
-        shots.splice(i, 1);
+        const removed = shots.splice(i, 1)[0];
+        lastDeleted = { shot: removed, index: i };
         updateBatch();
         renderList();
-        toast(`削除しました（残り ${shots.length}枚）`);
+        toast(`削除しました（残り ${shots.length}枚）　タップで取消できます`, 4000);
+        showUndoDelete();
       });
       item.appendChild(img);
       if (s.original) {
@@ -1199,6 +1411,7 @@
   }
   $('openListBtn').addEventListener('click', () => {
     renderList();
+    showUndoDelete();
     $('result').style.display = 'flex';
   });
 
