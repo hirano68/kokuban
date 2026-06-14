@@ -366,7 +366,7 @@
 <body>
 
 <header>
-  <h1><span>■</span>工事黒板カメラ<span class="ver">v3.6</span></h1>
+  <h1><span>■</span>工事黒板カメラ<span class="ver">v3.7</span></h1>
   <div>
     <button id="backCamBtn" class="hidden">📷 カメラへ</button>
     <button id="modeBtn">写真を選ぶ</button>
@@ -786,6 +786,7 @@
     inkCanvas.style.display = t === 'memo' ? 'block' : 'none';
     layoutAnn();
     applyBoard();
+    requestAnimationFrame(() => { applyBoard(); layoutAnn(); });
   }
   $('tabBoard').addEventListener('click', () => setTool('board'));
   $('tabMemo').addEventListener('click', () => setTool('memo'));
@@ -1180,8 +1181,10 @@
   $('toggleFields').addEventListener('click', () => {
     panelCollapsed = !panelCollapsed;
     applyPanelVisibility();
-    applyBoard();
-    layoutAnn();
+    // パネル開閉で画面サイズが変わるため、レイアウト確定後に黒板・メモを枠内へ収め直す
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => { applyBoard(); layoutAnn(); });
+    });
   });
 
   /* ---------- 音声入力（Web Speech API / ja-JP） ---------- */
