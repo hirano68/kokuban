@@ -42,12 +42,14 @@
   header h1 { font-size: 15px; font-weight: 600; letter-spacing: .08em; }
   header h1 span { color: var(--accent); margin-right: 6px; }
   header h1 .ver { color: var(--text-dim); font-size: 11px; font-weight: 400; margin-left: 8px; letter-spacing: 0; }
-  #modeBtn, #backCamBtn {
+  #modeBtn, #backCamBtn, #lensBtn {
     font-size: 12px; color: var(--text-dim);
     background: none; border: 1px solid var(--line);
     border-radius: 6px; padding: 6px 10px;
   }
   #backCamBtn { color: var(--accent); border-color: var(--accent); margin-right: 6px; }
+  #lensBtn { margin-right: 6px; }
+  #lensBtn.wide { color: var(--accent); border-color: var(--accent); }
 
   /* ---------- カメラ／写真エリア ---------- */
   #stage {
@@ -366,8 +368,9 @@
 <body>
 
 <header>
-  <h1><span>■</span>工事黒板カメラ<span class="ver">v3.7</span></h1>
+  <h1><span>■</span>工事黒板カメラ<span class="ver">v3.8</span></h1>
   <div>
+    <button id="lensBtn" class="hidden">広角</button>
     <button id="backCamBtn" class="hidden">📷 カメラへ</button>
     <button id="modeBtn">写真を選ぶ</button>
   </div>
@@ -630,16 +633,42 @@
     toastTimer = setTimeout(() => t.style.display = 'none', ms);
   }
 
-  /* ---------- カメラ起動 ---------- */
+  /* ---------- カメラ起動・レンズ切替 ---------- */
+  let backCams = [];      // 背面カメラのdeviceId一覧
+  let lensWide = false;   // 広角(超広角)モードか
+
+  // 背面カメラを列挙し、広角ボタンの表示可否を決める
+  async function detectCameras() {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const vids = devices.filter(d => d.kind === 'videoinput');
+      // 背面カメラ（背面・back・rear・environmentを含むラベル）を抽出
+      const backs = vids.filter(d => /back|rear|environment|背面/i.test(d.label));
+      backCams = (backs.length ? backs : vids).map(d => d.deviceId);
+      // 2つ以上の背面カメラがあれば広角切替を出す（超広角がある端末）
+      $('lensBtn').classList.toggle('hidden', backCams.length < 2);
+    } catch (e) {
+      $('lensBtn').classList.add('hidden');
+    }
+  }
+
+  async function openStream(constraints) {
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+    stream = await navigator.mediaDevices.getUserMedia(constraints);
+    video.srcObject = stream;
+    video.onloadedmetadata = () => showBoard();
+  }
+
   async function startCamera() {
     cancelPreview && cancelPreview();
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
-        audio: false
-      });
-      video.srcObject = stream;
-      video.onloadedmetadata = () => showBoard();
+      // 広角モードなら超広角候補（背面の最後のデバイス）を、通常は標準広角を使う
+      if (lensWide && backCams.length >= 2) {
+        const wideId = backCams[backCams.length - 1];
+        await openStream({ video: { deviceId: { exact: wideId } }, audio: false });
+      } else {
+        await openStream({ video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
+      }
       // 写真モードからの復帰処理
       stillImg.style.display = 'none';
       video.style.display = 'block';
@@ -651,13 +680,28 @@
       $('modeBtn').textContent = '写真を選ぶ';
       $('backCamBtn').classList.add('hidden');
       hint.classList.add('hidden');
+      $('lensBtn').classList.toggle('wide', lensWide);
+      $('lensBtn').textContent = lensWide ? '広角ON' : '広角';
       showBoard();
+      // 権限許可後に端末のカメラ一覧が取れるようになるので、ここで再判定
+      detectCameras();
     } catch (e) {
+      // 広角で失敗したら標準に戻して再試行
+      if (lensWide) {
+        lensWide = false;
+        toast('この端末では広角に切り替えられませんでした', 3000);
+        return startCamera();
+      }
       toast('カメラを起動できませんでした。「写真を選ぶ」をお試しください', 3500);
     }
   }
   $('startCamBtn').addEventListener('click', startCamera);
   $('backCamBtn').addEventListener('click', startCamera);
+  $('lensBtn').addEventListener('click', () => {
+    lensWide = !lensWide;
+    toast(lensWide ? '広角（超広角）に切り替えます' : '標準レンズに戻します');
+    startCamera();
+  });
 
   /* ---------- 写真モード ---------- */
   $('modeBtn').addEventListener('click', () => $('fileInput').click());
@@ -682,6 +726,7 @@
         resetPhotoZoom();
         $('modeBtn').textContent = '別の写真を選ぶ';
         $('backCamBtn').classList.remove('hidden');
+        $('lensBtn').classList.add('hidden');
         hint.classList.add('hidden');
         showBoard();
         toast('黒板の位置を調整して、シャッターで合成します');
@@ -1351,6 +1396,7 @@
       resetPhotoZoom();
       $('modeBtn').textContent = '別の写真を選ぶ';
       $('backCamBtn').classList.remove('hidden');
+      $('lensBtn').classList.add('hidden');
       showBoard(); layoutAnn();
       toast('編集できます。黒板・メモ・書込みを追加してシャッターで保存', 2600);
     };
