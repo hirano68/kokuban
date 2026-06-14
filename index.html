@@ -67,10 +67,10 @@
   #video, #stillImg {
     position: absolute; inset: 0;
     width: 100%; height: 100%;
-    object-fit: cover;
     z-index: 0;
   }
-  #stillImg { display: none; }
+  #video { object-fit: cover; }
+  #stillImg { object-fit: contain; display: none; background: #000; }
   #stageHint {
     position: absolute; inset: 0;
     z-index: 5;
@@ -319,7 +319,7 @@
     position: fixed; z-index: 9995;
     transform-origin: top left;
     background: #fff; color: #1a1a1a;
-    border: 2px solid #e0312d; border-radius: 8px;
+    border: 2px solid var(--bcol, #e0312d); border-radius: 8px;
     padding: 8px; font-size: 13px; line-height: 1.4;
     max-width: 200px; white-space: pre-wrap; word-break: break-all;
     box-shadow: 0 2px 8px rgba(0,0,0,.35);
@@ -329,7 +329,7 @@
   .bubble::after {
     content: ""; position: absolute; left: 14px; bottom: -9px;
     border-width: 9px 7px 0 7px; border-style: solid;
-    border-color: #e0312d transparent transparent transparent;
+    border-color: var(--bcol, #e0312d) transparent transparent transparent;
   }
 
   /* ---------- ペン書込みレイヤー ---------- */
@@ -366,7 +366,7 @@
 <body>
 
 <header>
-  <h1><span>■</span>工事黒板カメラ<span class="ver">v3.4</span></h1>
+  <h1><span>■</span>工事黒板カメラ<span class="ver">v3.6</span></h1>
   <div>
     <button id="backCamBtn" class="hidden">📷 カメラへ</button>
     <button id="modeBtn">写真を選ぶ</button>
@@ -394,7 +394,7 @@
     <button id="tabBoard" class="active">黒板</button>
     <button id="tabMemo">メモ・書込み</button>
   </div>
-  <div id="fields">
+  <div id="fields" class="hidden">
     <div class="fieldRow">
       <label>工事名</label>
       <input id="inProject" type="text" placeholder="例：◯◯邸 新築工事">
@@ -427,12 +427,13 @@
       <button id="eraserBtn">消しゴム</button>
       <button class="inkColor active" data-color="#e0312d" style="background:#e0312d" aria-label="赤"></button>
       <button class="inkColor" data-color="#ffd400" style="background:#ffd400" aria-label="黄"></button>
+      <button class="inkColor" data-color="#1f8a3b" style="background:#1f8a3b" aria-label="緑"></button>
+      <button class="inkColor" data-color="#2b6fd6" style="background:#2b6fd6" aria-label="青"></button>
       <button class="inkColor" data-color="#ffffff" style="background:#ffffff" aria-label="白"></button>
-      <button id="undoInkBtn">↩ 取消</button>
     </div>
   </div>
   <div id="controls">
-    <button id="toggleFields">入力を隠す</button>
+    <button id="toggleFields">入力を表示</button>
     <button id="shutter" aria-label="撮影"></button>
     <div class="sizeBtns">
       <button id="sizeDown" aria-label="黒板を小さく">−</button>
@@ -692,9 +693,19 @@
   });
 
   /* ---------- 黒板の表示と移動 ---------- */
+  let userScaled = false; // ユーザーが＋−やピンチで手動調整したか
+  function autoScaleBoard() {
+    if (userScaled) return;
+    const r = frame.getBoundingClientRect();
+    if (!r.width) return;
+    // 黒板の幅がカメラ画面の約48%になるよう調整（基準190px）
+    const target = r.width * 0.48;
+    scale = Math.min(2.5, Math.max(0.6, target / 190));
+  }
   function showBoard() {
     const r = frame.getBoundingClientRect();
-    if (!pos) pos = { x: r.width * 0.05, y: r.height * 0.35 };
+    if (!pos) pos = { x: r.width * 0.05, y: r.height * 0.3 };
+    autoScaleBoard();
     applyBoard();
   }
   // 起動直後から黒板を表示しておく
@@ -729,6 +740,7 @@
   board.addEventListener('touchmove', e => {
     e.preventDefault();
     if (pinch && e.touches.length === 2) {
+      userScaled = true;
       scale = Math.min(2.5, Math.max(0.5, pinch.s * dist(e.touches) / pinch.d));
       applyBoard();
     } else if (drag && e.touches.length === 1) {
@@ -749,19 +761,26 @@
     window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up);
   });
 
-  $('sizeUp').addEventListener('click', () => { scale = Math.min(2.5, scale + 0.1); applyBoard(); });
-  $('sizeDown').addEventListener('click', () => { scale = Math.max(0.5, scale - 0.1); applyBoard(); });
+  $('sizeUp').addEventListener('click', () => { userScaled = true; scale = Math.min(2.5, scale + 0.1); applyBoard(); });
+  $('sizeDown').addEventListener('click', () => { userScaled = true; scale = Math.max(0.5, scale - 0.1); applyBoard(); });
 
   /* ---------- ツール切替（黒板／メモ・書込み） ---------- */
   let tool = 'board';
   const inkCanvas = $('inkCanvas');
   const inkCtx = inkCanvas.getContext('2d');
+  let panelCollapsed = true;  // 起動時はカメラ画面を広く取るため畳んでおく
+  function applyPanelVisibility() {
+    const showBoardFields = (tool === 'board') && !panelCollapsed;
+    const showMemoPanel = (tool === 'memo') && !panelCollapsed;
+    $('fields').classList.toggle('hidden', !showBoardFields);
+    $('memoPanel').classList.toggle('hidden', !showMemoPanel);
+    $('toggleFields').textContent = panelCollapsed ? '入力を表示' : '入力を隠す';
+  }
   function setTool(t) {
     tool = t;
     $('tabBoard').classList.toggle('active', t === 'board');
     $('tabMemo').classList.toggle('active', t === 'memo');
-    $('fields').classList.toggle('hidden', t !== 'board');
-    $('memoPanel').classList.toggle('hidden', t !== 'memo');
+    applyPanelVisibility();
     board.style.display = t === 'board' ? '' : 'none';
     document.querySelectorAll('.bubble').forEach(el => el.style.display = t === 'memo' ? '' : 'none');
     inkCanvas.style.display = t === 'memo' ? 'block' : 'none';
@@ -782,9 +801,10 @@
     let y = 0.15 + (Math.floor(n / 4) % 3) * stepY + (n % 2) * 0.05 + (Math.random() * 0.04 - 0.02);
     x = Math.min(Math.max(x, 0.04), 0.7);
     y = Math.min(Math.max(y, 0.05), 0.8);
-    const b = { x: x, y: y, scale: 1, text: text || 'メモ', el: null };
+    const b = { x: x, y: y, scale: 1, text: text || 'メモ', color: inkColor, el: null };
     const el = document.createElement('div');
     el.className = 'bubble';
+    el.style.setProperty('--bcol', inkColor);
     document.body.appendChild(el);
     b.el = el;
     bubbles.push(b);
@@ -796,8 +816,19 @@
   function selectBubble(b) {
     selBubble = b;
     document.querySelectorAll('.bubble').forEach(el => el.classList.remove('sel'));
-    if (b) { b.el.classList.add('sel'); $('inBubble').value = b.text; }
-    else $('inBubble').value = '';
+    if (b) {
+      b.el.classList.add('sel');
+      $('inBubble').value = b.text;
+      // パレットの選択状態をこの吹き出しの色に合わせる
+      if (b.color) {
+        inkColor = b.color;
+        document.querySelectorAll('.inkColor').forEach(x => {
+          x.classList.toggle('active', x.dataset.color === b.color);
+        });
+      }
+    } else {
+      $('inBubble').value = '';
+    }
   }
   function attachBubbleEvents(b) {
     let bd = null, bp = null;
@@ -876,6 +907,11 @@
       inkColor = btn.dataset.color;
       document.querySelectorAll('.inkColor').forEach(x => x.classList.remove('active'));
       btn.classList.add('active');
+      // 吹き出しを選択中なら、その吹き出しの色を変更
+      if (selBubble && !penOn && !markerOn && !eraserOn) {
+        selBubble.color = inkColor;
+        selBubble.el.style.setProperty('--bcol', inkColor);
+      }
       // 色を選んだら描画モードへ（消しゴム解除）。マーカー選択中はマーカーのまま
       if (eraserOn) {
         eraserOn = false; $('eraserBtn').classList.remove('active');
@@ -883,11 +919,6 @@
         inkCanvas.style.pointerEvents = 'auto';
       }
     });
-  });
-  $('undoInkBtn').addEventListener('click', () => {
-    if (strokes.length === 0) { toast('取り消す書込みがありません'); return; }
-    strokes.pop();
-    redrawInk();
   });
   // 消しゴム：指の位置に近いストローク／吹き出しを消す（座標は写真座標で受け取る）
   function eraseAt(nx, ny) {
@@ -1118,11 +1149,12 @@
       const bw = tw + pad * 2 + 4 * q;
       const bh = lines.length * lh + pad * 2;
       const bx = b.x * OUT_W, by = b.y * OUT_H;
+      const bcol = b.color || '#e0312d';
       // 本体
       roundRect(ctx, bx, by, bw, bh, 8 * q);
       ctx.fillStyle = '#ffffff';
       ctx.fill();
-      ctx.strokeStyle = '#e0312d';
+      ctx.strokeStyle = bcol;
       ctx.lineWidth = 2 * q;
       ctx.stroke();
       // しっぽ
@@ -1133,7 +1165,7 @@
       ctx.closePath();
       ctx.fillStyle = '#ffffff';
       ctx.fill();
-      ctx.strokeStyle = '#e0312d';
+      ctx.strokeStyle = bcol;
       ctx.stroke();
       // 文字
       ctx.fillStyle = '#1a1a1a';
@@ -1146,9 +1178,8 @@
   }
 
   $('toggleFields').addEventListener('click', () => {
-    const f = tool === 'board' ? $('fields') : $('memoPanel');
-    const hidden = f.classList.toggle('hidden');
-    $('toggleFields').textContent = hidden ? '入力を表示' : '入力を隠す';
+    panelCollapsed = !panelCollapsed;
+    applyPanelVisibility();
     applyBoard();
     layoutAnn();
   });
@@ -1201,30 +1232,34 @@
   /* ---------- 合成して保存待ちに追加 ---------- */
   function commitShot() {
     const r = frame.getBoundingClientRect();
-    let srcW, srcH, draw;
-    if (mode === 'live') {
-      if (!stream || !video.videoWidth) { toast('先にカメラを起動してください'); return; }
-      srcW = video.videoWidth; srcH = video.videoHeight;
-      draw = (ctx, cropX, cropY, cw, ch) => ctx.drawImage(video, cropX, cropY, cw, ch, 0, 0, OUT_W, OUT_H);
-    } else {
-      if (!stillImage) { toast('先に写真を選んでください'); return; }
-      srcW = stillImage.naturalWidth; srcH = stillImage.naturalHeight;
-      draw = (ctx, cropX, cropY, cw, ch) => ctx.drawImage(stillImage, cropX, cropY, cw, ch, 0, 0, OUT_W, OUT_H);
-    }
     const frameRatio = OUT_W / OUT_H;
-    const srcRatio = srcW / srcH;
-    let cropW, cropH, cropX, cropY;
-    if (srcRatio > frameRatio) { cropH = srcH; cropW = srcH * frameRatio; cropX = (srcW - cropW) / 2; cropY = 0; }
-    else { cropW = srcW; cropH = srcW / frameRatio; cropX = 0; cropY = (srcH - cropH) / 2; }
 
     // ベース画像（黒板・メモなし・ズームなし）を作成
     const baseCanvas = document.createElement('canvas');
     baseCanvas.width = OUT_W; baseCanvas.height = OUT_H;
     const baseCtx = baseCanvas.getContext('2d');
-    draw(baseCtx, cropX, cropY, cropW, cropH);
+    baseCtx.fillStyle = '#000';
+    baseCtx.fillRect(0, 0, OUT_W, OUT_H); // 余白は黒で塗る
+
+    if (mode === 'live') {
+      if (!stream || !video.videoWidth) { toast('先にカメラを起動してください'); return; }
+      // ライブはcover（枠いっぱい・はみ出しは切り取り）
+      const srcW = video.videoWidth, srcH = video.videoHeight, srcRatio = srcW / srcH;
+      let cropW, cropH, cropX, cropY;
+      if (srcRatio > frameRatio) { cropH = srcH; cropW = srcH * frameRatio; cropX = (srcW - cropW) / 2; cropY = 0; }
+      else { cropW = srcW; cropH = srcW / frameRatio; cropX = 0; cropY = (srcH - cropH) / 2; }
+      baseCtx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, OUT_W, OUT_H);
+    } else {
+      if (!stillImage) { toast('先に写真を選んでください'); return; }
+      // 写真モードはcontain（全体を切らずに収める・余白は黒）
+      const srcW = stillImage.naturalWidth, srcH = stillImage.naturalHeight, srcRatio = srcW / srcH;
+      let dw, dh, dx, dy;
+      if (srcRatio > frameRatio) { dw = OUT_W; dh = OUT_W / srcRatio; dx = 0; dy = (OUT_H - dh) / 2; }
+      else { dh = OUT_H; dw = OUT_H * srcRatio; dy = 0; dx = (OUT_W - dw) / 2; }
+      baseCtx.drawImage(stillImage, 0, 0, srcW, srcH, dx, dy, dw, dh);
+    }
 
     // カメラ由来の撮影なら、黒板なしの元写真も保存待ちに追加（元画像を残す）
-    // fromCamera: ライブ撮影 or プレビューから編集に入った写真
     if (fromCamera) {
       const baseURL = baseCanvas.toDataURL('image/jpeg', 0.92);
       shots.push({ dataURL: baseURL, blob: dataURLtoBlob(baseURL), original: true });
@@ -1282,9 +1317,16 @@
   }
   // ライブ映像の現在フレームを画面に静止表示（プレビュー用、カメラは止めない）
   function showFrozenPreview() {
+    // ライブ表示（cover）と同じ見た目になるよう4:3にcover切り出しした静止画を作る
     const c = document.createElement('canvas');
-    c.width = video.videoWidth; c.height = video.videoHeight;
-    c.getContext('2d').drawImage(video, 0, 0);
+    c.width = OUT_W; c.height = OUT_H;
+    const cx = c.getContext('2d');
+    const srcW = video.videoWidth, srcH = video.videoHeight, srcRatio = srcW / srcH;
+    const frameRatio = OUT_W / OUT_H;
+    let cropW, cropH, cropX, cropY;
+    if (srcRatio > frameRatio) { cropH = srcH; cropW = srcH * frameRatio; cropX = (srcW - cropW) / 2; cropY = 0; }
+    else { cropW = srcW; cropH = srcW / frameRatio; cropX = 0; cropY = (srcH - cropH) / 2; }
+    cx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, OUT_W, OUT_H);
     stillImg.src = c.toDataURL('image/jpeg', 0.92);
     stillImg.style.display = 'block';
     video.style.display = 'none';
@@ -1585,6 +1627,9 @@
   $('retryBtn').addEventListener('click', () => {
     $('result').style.display = 'none';
   });
+
+  // 起動時の初期化（カメラ画面を広く取るため入力欄は畳んだ状態）
+  setTool('board');
 })();
 </script>
 </body>
