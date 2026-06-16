@@ -115,6 +115,11 @@
   #board .bval { flex: 1; font-size: 12px; white-space: nowrap; overflow: hidden; }
   #board .bmemo { min-height: 46px; font-size: 12px; padding: 5px 0 2px; line-height: 1.5; white-space: pre; overflow: hidden; }
 
+  /* ホワイトボード表示（白地・黒文字） */
+  #board.white { background: #fdfdf8; color: #1a1a1a; }
+  #board.white .bcompany { border-top-color: rgba(0,0,0,.4); }
+  #board.white .brow { border-bottom-color: rgba(0,0,0,.4); }
+
   /* ---------- 操作パネル ---------- */
   #panel {
     background: var(--panel);
@@ -368,7 +373,7 @@
 <body>
 
 <header>
-  <h1><span>■</span>工事黒板カメラ<span class="ver">v3.8</span></h1>
+  <h1><span>■</span>工事黒板カメラ<span class="ver">v4.0</span></h1>
   <div>
     <button id="lensBtn" class="hidden">広角</button>
     <button id="backCamBtn" class="hidden">📷 カメラへ</button>
@@ -394,7 +399,7 @@
     <button id="saveAllBtn">まとめて保存</button>
   </div>
   <div id="toolTabs">
-    <button id="tabBoard" class="active">黒板</button>
+    <button id="tabBoard" class="active">黒板（緑）</button>
     <button id="tabMemo">メモ・書込み</button>
   </div>
   <div id="fields" class="hidden">
@@ -809,6 +814,14 @@
   $('sizeUp').addEventListener('click', () => { userScaled = true; scale = Math.min(2.5, scale + 0.1); applyBoard(); });
   $('sizeDown').addEventListener('click', () => { userScaled = true; scale = Math.max(0.5, scale - 0.1); applyBoard(); });
 
+  /* ---------- 黒板の色（緑／白）切替 ---------- */
+  let boardWhite = false;
+  function setBoardColor(white) {
+    boardWhite = white;
+    board.classList.toggle('white', white);
+    $('tabBoard').textContent = white ? '黒板（白）' : '黒板（緑）';
+  }
+
   /* ---------- ツール切替（黒板／メモ・書込み） ---------- */
   let tool = 'board';
   const inkCanvas = $('inkCanvas');
@@ -833,7 +846,10 @@
     applyBoard();
     requestAnimationFrame(() => { applyBoard(); layoutAnn(); });
   }
-  $('tabBoard').addEventListener('click', () => setTool('board'));
+  $('tabBoard').addEventListener('click', () => {
+    if (tool === 'board') { setBoardColor(!boardWhite); }  // 既に黒板タブなら色を切替
+    else setTool('board');
+  });
   $('tabMemo').addEventListener('click', () => setTool('memo'));
 
   /* ---------- 吹き出し ---------- */
@@ -1570,6 +1586,10 @@
     const memo = $('inMemo').value;
     const valMaxW = w - padX * 2 - 58 * u;
     const memoMaxW = w - padX * 2;
+    // 配色（緑黒板／白ホワイトボード）
+    const COL = boardWhite
+      ? { face: '#fdfdf8', text: '#1a1a1a', line: 'rgba(0,0,0,.4)', frame: '#cfcabd' }
+      : { face: '#0d5938', text: '#ffffff', line: 'rgba(255,255,255,.55)', frame: '#d8d3c4' };
 
     // 工事名・工種：縮小→下限に達したら自動改行
     const rows = [
@@ -1599,16 +1619,16 @@
     const h = 8 * u + rowsH + memoH + companyH + 8 * u;
 
     // 枠と地
-    ctx.fillStyle = '#d8d3c4';
+    ctx.fillStyle = COL.frame;
     ctx.fillRect(x - frame, y - frame, w + frame * 2, h + frame * 2);
-    ctx.fillStyle = '#0d5938';
+    ctx.fillStyle = COL.face;
     ctx.fillRect(x, y, w, h);
 
     // 行（工事名・工種）
     ctx.textBaseline = 'middle';
     let cy = y + 8 * u;
     rows.forEach(r => {
-      ctx.fillStyle = '#fff';
+      ctx.fillStyle = COL.text;
       ctx.font = `bold ${fsLabel}px "Hiragino Sans", sans-serif`;
       ctx.fillText(r.label, x + padX, cy + Math.min(r.rowH, baseLineH) / 2);
       ctx.font = `${r.vfs}px "Hiragino Sans", sans-serif`;
@@ -1618,13 +1638,13 @@
         vy += r.vfs * 1.45;
       });
       cy += r.rowH;
-      ctx.strokeStyle = 'rgba(255,255,255,.55)';
+      ctx.strokeStyle = COL.line;
       ctx.lineWidth = 1 * u;
       ctx.beginPath(); ctx.moveTo(x + padX, cy); ctx.lineTo(x + w - padX, cy); ctx.stroke();
     });
 
     // メモ
-    ctx.fillStyle = '#fff';
+    ctx.fillStyle = COL.text;
     ctx.font = `${memoFs}px "Hiragino Sans", sans-serif`;
     let my = cy + 6 * u + memoFs * 0.75;
     memoLines.forEach(line => {
@@ -1634,10 +1654,10 @@
 
     // 社名（右下）
     const compY = y + h - companyH;
-    ctx.strokeStyle = 'rgba(255,255,255,.55)';
+    ctx.strokeStyle = COL.line;
     ctx.lineWidth = 1 * u;
     ctx.beginPath(); ctx.moveTo(x + padX, compY); ctx.lineTo(x + w - padX, compY); ctx.stroke();
-    ctx.fillStyle = '#fff';
+    ctx.fillStyle = COL.text;
     ctx.font = `bold ${11 * u}px "Hiragino Sans", sans-serif`;
     ctx.textAlign = 'right';
     ctx.fillText('㈱千田工務店', x + w - padX, compY + companyH / 2 + 2 * u);
