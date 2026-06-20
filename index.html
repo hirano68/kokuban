@@ -318,6 +318,7 @@
   #memoTools #penBtn.active { background: var(--danger); border-color: var(--danger); color: #fff; }
   #memoTools #markerBtn.active { background: #d8b400; border-color: #d8b400; color: #1a1a1a; }
   #memoTools #eraserBtn.active { background: #4a90d9; border-color: #4a90d9; color: #fff; }
+  #memoColors { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
   .inkColor { width: 34px; height: 34px; border-radius: 50% !important; padding: 0 !important; border: 2px solid var(--line) !important; }
   .inkColor.active { border-color: #fff !important; box-shadow: 0 0 0 2px var(--accent); }
 
@@ -373,7 +374,7 @@
 <body>
 
 <header>
-  <h1><span>■</span>工事黒板カメラ<span class="ver">v4.0</span></h1>
+  <h1><span>■</span>工事黒板カメラ<span class="ver">v4.2</span></h1>
   <div>
     <button id="lensBtn" class="hidden">広角</button>
     <button id="backCamBtn" class="hidden">📷 カメラへ</button>
@@ -433,6 +434,8 @@
       <button id="penBtn">🖊 ペン</button>
       <button id="markerBtn">🖍 マーカー</button>
       <button id="eraserBtn">消しゴム</button>
+    </div>
+    <div id="memoColors">
       <button class="inkColor active" data-color="#e0312d" style="background:#e0312d" aria-label="赤"></button>
       <button class="inkColor" data-color="#ffd400" style="background:#ffd400" aria-label="黄"></button>
       <button class="inkColor" data-color="#1f8a3b" style="background:#1f8a3b" aria-label="緑"></button>
@@ -811,8 +814,14 @@
     window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up);
   });
 
-  $('sizeUp').addEventListener('click', () => { userScaled = true; scale = Math.min(2.5, scale + 0.1); applyBoard(); });
-  $('sizeDown').addEventListener('click', () => { userScaled = true; scale = Math.max(0.5, scale - 0.1); applyBoard(); });
+  $('sizeUp').addEventListener('click', () => {
+    if (tool === 'memo') { resizeBubble(0.15); return; }
+    userScaled = true; scale = Math.min(2.5, scale + 0.1); applyBoard();
+  });
+  $('sizeDown').addEventListener('click', () => {
+    if (tool === 'memo') { resizeBubble(-0.15); return; }
+    userScaled = true; scale = Math.max(0.5, scale - 0.1); applyBoard();
+  });
 
   /* ---------- 黒板の色（緑／白）切替 ---------- */
   let boardWhite = false;
@@ -929,6 +938,12 @@
     });
   }
   $('addBubbleBtn').addEventListener('click', () => addBubble($('inBubble').value.trim() || 'メモ'));
+  // 選択中の吹き出しを拡大縮小（文字も追随：吹き出し全体をscaleするため）
+  function resizeBubble(delta) {
+    if (!selBubble) { toast('サイズを変える吹き出しをタップで選んでください'); return; }
+    selBubble.scale = Math.min(3, Math.max(0.5, selBubble.scale + delta));
+    layoutAnn();
+  }
   $('inBubble').addEventListener('input', () => {
     if (!selBubble) {
       if ($('inBubble').value.trim()) addBubble($('inBubble').value);
