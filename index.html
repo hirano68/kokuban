@@ -374,7 +374,7 @@
 <body>
 
 <header>
-  <h1><span>■</span>工事黒板カメラ<span class="ver">v4.3</span></h1>
+  <h1><span>■</span>工事黒板カメラ<span class="ver">v4.4</span></h1>
   <div>
     <button id="lensBtn" class="hidden">広角</button>
     <button id="backCamBtn" class="hidden">📷 カメラへ</button>
@@ -1311,7 +1311,7 @@
   /* ---------- 撮影・合成 ---------- */
   const OUT_W = 1280, OUT_H = 960; // 出力サイズ固定（4:3横・約120万画素：工事写真標準）
   /* ---------- 合成して保存待ちに追加 ---------- */
-  function commitShot() {
+  function commitShot(originalOnly) {
     const r = frame.getBoundingClientRect();
     const frameRatio = OUT_W / OUT_H;
 
@@ -1341,6 +1341,15 @@
       if (srcRatio > frameRatio) { dw = OUT_W; dh = OUT_W / srcRatio; dx = 0; dy = (OUT_H - dh) / 2; }
       else { dh = OUT_H; dw = OUT_H * srcRatio; dy = 0; dx = (OUT_W - dw) / 2; }
       baseCtx.drawImage(stillImage, 0, 0, srcW, srcH, dx, dy, dw, dh);
+    }
+
+    // 無操作で自動保存された場合は、元画像1枚だけ保存（同じ写真が2枚になるのを防ぐ）
+    if (originalOnly) {
+      const baseURL = baseCanvas.toDataURL('image/jpeg', 0.92);
+      shots.push({ dataURL: baseURL, blob: dataURLtoBlob(baseURL), original: true });
+      updateBatch();
+      toast(`保存待ちに追加しました（${shots.length}枚）`);
+      return;
     }
 
     // カメラ由来の撮影なら、黒板なしの元写真も保存待ちに追加（元画像を残す）
@@ -1470,7 +1479,7 @@
         previewCount -= 1;
         if (previewCount <= 0) {
           cancelPreview();
-          commitShot();           // 無操作 → そのまま保存待ちへ
+          commitShot(true);       // 無操作の自動保存 → 元画像1枚のみ
           startCamera();          // ライブに戻す
         } else {
           $('ctCount').textContent = previewCount;
