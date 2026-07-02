@@ -374,7 +374,7 @@
 <body>
 
 <header>
-  <h1><span>■</span>工事黒板カメラ<span class="ver">v4.2</span></h1>
+  <h1><span>■</span>工事黒板カメラ<span class="ver">v4.3</span></h1>
   <div>
     <button id="lensBtn" class="hidden">広角</button>
     <button id="backCamBtn" class="hidden">📷 カメラへ</button>
@@ -503,6 +503,7 @@
   let mode = 'live';          // 'live' | 'still'
   let stream = null;
   let stillImage = null;      // 写真モードで読み込んだ Image
+  let frozenFrame = null;     // シャッター押下の瞬間に固定した4:3フレーム（canvas）
   let fromCamera = false;     // この画像がカメラ撮影由来か（元画像を残すかの判定）
   let scale = 1.0;
   let pos = null;             // 黒板の左上位置（stage内px）
@@ -681,6 +682,7 @@
       stillImg.style.display = 'none';
       video.style.display = 'block';
       stillImage = null;
+      frozenFrame = null;
       fromCamera = false;
       mode = 'live';
       clearAnnotations();
@@ -1321,13 +1323,16 @@
     baseCtx.fillRect(0, 0, OUT_W, OUT_H); // 余白は黒で塗る
 
     if (mode === 'live') {
-      if (!stream || !video.videoWidth) { toast('先にカメラを起動してください'); return; }
-      // ライブはcover（枠いっぱい・はみ出しは切り取り）
-      const srcW = video.videoWidth, srcH = video.videoHeight, srcRatio = srcW / srcH;
+      // シャッター押下の瞬間に固定したフレームを使う（3秒のズレを解消）
+      const srcEl = frozenFrame || video;
+      const srcW = frozenFrame ? frozenFrame.width : video.videoWidth;
+      const srcH = frozenFrame ? frozenFrame.height : video.videoHeight;
+      if (!srcW || !srcH) { toast('先にカメラを起動してください'); return; }
+      const srcRatio = srcW / srcH;
       let cropW, cropH, cropX, cropY;
       if (srcRatio > frameRatio) { cropH = srcH; cropW = srcH * frameRatio; cropX = (srcW - cropW) / 2; cropY = 0; }
       else { cropW = srcW; cropH = srcW / frameRatio; cropX = 0; cropY = (srcH - cropH) / 2; }
-      baseCtx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, OUT_W, OUT_H);
+      baseCtx.drawImage(srcEl, cropX, cropY, cropW, cropH, 0, 0, OUT_W, OUT_H);
     } else {
       if (!stillImage) { toast('先に写真を選んでください'); return; }
       // 写真モードはcontain（全体を切らずに収める・余白は黒）
@@ -1406,10 +1411,13 @@
     if (srcRatio > frameRatio) { cropH = srcH; cropW = srcH * frameRatio; cropX = (srcW - cropW) / 2; cropY = 0; }
     else { cropW = srcW; cropH = srcW / frameRatio; cropX = 0; cropY = (srcH - cropH) / 2; }
     cx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, OUT_W, OUT_H);
-    stillImg.src = c.toDataURL('image/jpeg', 0.92);
+    const url = c.toDataURL('image/jpeg', 0.92);
+    stillImg.src = url;
     stillImg.style.display = 'block';
     video.style.display = 'none';
     previewFrozen = true;
+    // 保存・合成で使うため、押下時のフレーム（canvas）を同期的に保持
+    frozenFrame = c;
   }
   // プレビュー中のタップ → そのフレームを確定して編集モードへ
   function enterEditFromPreview() {
