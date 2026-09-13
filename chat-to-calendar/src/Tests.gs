@@ -22,6 +22,13 @@ var Tests = (function () {
     return f(ev.start) + '..' + f(ev.end);
   }
 
+  /** 繰り返し設定を比較用の短い文字列にする。 */
+  function recurStr(ev) {
+    if (!ev.recurrence) return '';
+    var r = ev.recurrence;
+    return r.freq + '/' + r.interval + '/' + ((r.byDay || []).join(',')) + (r.byMonthDay ? '/' + r.byMonthDay : '');
+  }
+
   var CASES = [
     {
       name: '日付+時刻レンジ+件名',
@@ -105,6 +112,11 @@ var Tests = (function () {
       expect: [{ when: '2026-12-28..2027-01-06', title: '冬季休暇' }]
     },
     {
+      name: '日付レンジの区切りが件名に残らない',
+      text: '念のため再送: 10/1~10/3 出張します',
+      expect: [{ when: '2026-10-01..2026-10-04', title: '念のため再送: 出張します' }]
+    },
+    {
       name: '時刻だけなら当日扱い',
       text: 'ミーティングは9:30から',
       expect: [{ when: '2026-09-13 09:30..2026-09-13 10:30', title: 'ミーティング' }]
@@ -123,6 +135,51 @@ var Tests = (function () {
       name: '末尾の定型句は件名から落とす',
       text: 'おはようございます。9/20 10:00~12:00 A様邸 定例打合せ よろしくお願いします',
       expect: [{ when: '2026-09-20 10:00..2026-09-20 12:00', title: 'A様邸 定例打合せ' }]
+    },
+    {
+      name: '毎週の繰り返し',
+      text: '毎週月曜 10時 定例会議',
+      expect: [{ when: '2026-09-14 10:00..2026-09-14 11:00', title: '定例会議', recur: 'WEEKLY/1/MO' }]
+    },
+    {
+      name: '隔週の繰り返し',
+      text: '隔週火曜 13時 現場定例',
+      expect: [{ when: '2026-09-15 13:00..2026-09-15 14:00', title: '現場定例', recur: 'WEEKLY/2/TU' }]
+    },
+    {
+      name: '毎月◯日の繰り返し',
+      text: '毎月15日 9時 安全パトロール',
+      expect: [{ when: '2026-09-15 09:00..2026-09-15 10:00', title: '安全パトロール', recur: 'MONTHLY/1//15' }]
+    },
+    {
+      name: '平日の繰り返しは開始日を平日まで送る',
+      text: '平日 8時 朝礼',
+      expect: [{ when: '2026-09-14 08:00..2026-09-14 09:00', title: '朝礼', recur: 'WEEKLY/1/MO,TU,WE,TH,FR' }]
+    },
+    {
+      name: '午後イチ',
+      text: '明日 午後イチ 打合せ',
+      expect: [{ when: '2026-09-14 13:00..2026-09-14 14:00', title: '打合せ' }]
+    },
+    {
+      name: '朝イチ',
+      text: '明日 朝イチで 現場確認',
+      expect: [{ when: '2026-09-14 08:00..2026-09-14 09:00', title: '現場確認' }]
+    },
+    {
+      name: '午前中は 9:00-12:00',
+      text: '明日 午前中 検査',
+      expect: [{ when: '2026-09-14 09:00..2026-09-14 12:00', title: '検査' }]
+    },
+    {
+      name: '所要時間（分）',
+      text: '9/20 10時から30分 打合せ',
+      expect: [{ when: '2026-09-20 10:00..2026-09-20 10:30', title: '打合せ' }]
+    },
+    {
+      name: '所要時間（時間）',
+      text: '9/20 10:00から1時間 現場打合せ',
+      expect: [{ when: '2026-09-20 10:00..2026-09-20 11:00', title: '現場打合せ' }]
     },
     {
       name: '日付だけなら終日予定',
@@ -156,6 +213,10 @@ var Tests = (function () {
       }
       if (expected[i].location !== undefined && events[i].location !== expected[i].location) {
         return { ok: false, message: '[' + i + '] 場所が違う。期待 "' + expected[i].location + '" / 実際 "' + events[i].location + '"' };
+      }
+      var expectedRecur = expected[i].recur || '';
+      if (recurStr(events[i]) !== expectedRecur) {
+        return { ok: false, message: '[' + i + '] 繰り返しが違う。期待 "' + expectedRecur + '" / 実際 "' + recurStr(events[i]) + '"' };
       }
     }
     return { ok: true };

@@ -56,6 +56,12 @@ var CONFIG_BASE = {
   maxEventsPerMessage: 5,
   skipPastMinutes: 120,
   defaultTitle: '打合せ',
+  /** 「毎週月曜」などの繰り返し予定を作る。false なら初回の 1 件だけ登録する */
+  allowRecurring: true,
+  /** 繰り返しを何回分作るか */
+  recurrenceCounts: { DAILY: 60, WEEKLY: 26, MONTHLY: 12, YEARLY: 5 },
+  /** 同じ時間帯に同名の予定があれば登録しない（別メッセージで同じ予定が流れたとき用） */
+  skipIfSimilarEventExists: true,
 
   // ---- 動作モード -----------------------------------------------------------
   /** true の場合はカレンダーに書き込まず、ログ出力だけ行う */

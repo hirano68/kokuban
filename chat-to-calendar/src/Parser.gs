@@ -49,7 +49,9 @@ var Parser = (function () {
     // 基準日からこの日数より先の予定は誤検出とみなして捨てる
     maxFutureDays: 400,
     defaultTitle: '打合せ',
-    maxTitleLength: 100
+    maxTitleLength: 100,
+    // 繰り返し予定を何回分まで作るか（無限に増やさないための上限）
+    recurrenceCounts: { DAILY: 60, WEEKLY: 26, MONTHLY: 12, YEARLY: 5 }
   };
 
   // ---------------------------------------------------------------- utilities
@@ -191,7 +193,31 @@ var Parser = (function () {
     { // 正午
       re: /(正午)/g,
       build: function () { return { marker: null, hour: 12, minute: 0 }; }
+    },
+    { // 数字が無いときの目安（朝イチ・午後イチ・午前中 など）
+      re: /(朝イチ|朝一|午前中|午後イチ|午後一|昼イチ|昼一|夕方|夜間|夜)/g,
+      build: function (m) {
+        switch (m[1]) {
+          case '朝イチ': case '朝一': return { marker: '午前', hour: 8, minute: 0 };
+          case '午前中': return { marker: '午前', hour: 9, minute: 0, durationMinutes: 180 };
+          case '午後イチ': case '午後一': case '昼イチ': case '昼一': return { marker: '午後', hour: 13, minute: 0 };
+          case '夕方': return { marker: '午後', hour: 17, minute: 0 };
+          case '夜': case '夜間': return { marker: '午後', hour: 19, minute: 0 };
+        }
+        return null;
+      }
     }
+  ];
+
+  // 繰り返し。曜日や日付は後段の DATE_RULES に残すため、この語だけを取り除く。
+  var WEEKDAY_CODE = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+  var RECURRENCE_RULES = [
+    { re: /隔週/, freq: 'WEEKLY', interval: 2 },
+    { re: /毎週|週次/, freq: 'WEEKLY', interval: 1 },
+    { re: /毎月|月次/, freq: 'MONTHLY', interval: 1 },
+    { re: /毎日/, freq: 'DAILY', interval: 1 },
+    { re: /毎年/, freq: 'YEARLY', interval: 1 },
+    { re: /平日/, freq: 'WEEKLY', interval: 1, byDay: ['MO', 'TU', 'WE', 'TH', 'FR'] }
   ];
 
   function applyMeridiem(t, cfg) {
@@ -204,7 +230,7 @@ var Parser = (function () {
       hour += 12;                                        // 「3時」→ 15:00
     }
     if (hour > 23 || hour < 0) return null;
-    return { hour: hour, minute: t.minute, explicit: !!t.marker };
+    return { hour: hour, minute: t.minute, explicit: !!t.marker, durationMinutes: t.durationMinutes || null };
   }
 
   var RANGE_SEPARATOR = /^\s*(?:~|-|から|より|→|>|to|まで)\s*(?:まで)?\s*$/;
@@ -289,6 +315,16 @@ var Parser = (function () {
     return false;
   }
 
+  /** 予定全体を n 日ずらす（繰り返しの開始日合わせ用）。 */
+  function shiftEventByDays(event, n) {
+    event.start = new Date(event.start.getTime() + n * DAY_MS);
+    event.end = new Date(event.end.getTime() + n * DAY_MS);
+    if (event.allDay) {
+      event.startDate = ymd(event.start);
+      event.endDateExclusive = ymd(event.end);
+    }
+  }
+
   // -------------------------------------------------------------- main parsing
 
   /**
@@ -318,6 +354,18 @@ var Parser = (function () {
       consume(allDayMatch.index, allDayMatch.index + allDayMatch[0].length);
     }
 
+    // 繰り返し（「毎週月曜」の「毎週」だけを取り除き、「月曜」は日付として解釈させる）
+    var recurrence = null;
+    for (var ri = 0; ri < RECURRENCE_RULES.length; ri++) {
+      var rr = RECURRENCE_RULES[ri];
+      var rm = rr.re.exec(work);
+      if (rm) {
+        recurrence = { freq: rr.freq, interval: rr.interval, byDay: rr.byDay ? rr.byDay.slice() : null };
+        consume(rm.index, rm.index + rm[0].length);
+        break;
+      }
+    }
+
     // 場所
     var location = null;
     var loc = extractLocation(work);
@@ -344,12 +392,14 @@ var Parser = (function () {
       var betweenDates = work.substring(dates[0].end, dates[1].index);
       if (RANGE_SEPARATOR.test(betweenDates) && betweenDates.trim() !== '') {
         endDate = dates[1].value;
+        consume(dates[0].end, dates[1].index);   // 「~」が件名に残らないようにする
       }
     }
 
     // 時刻の範囲指定（10:00~12:00 / 10時から12時）
     var startTime = null;
     var endTime = null;
+    var durationMinutes = null;
     if (times.length) {
       startTime = applyMeridiem(times[0].value, cfg);
       if (times.length >= 2) {
@@ -358,6 +408,15 @@ var Parser = (function () {
           endTime = applyMeridiem(times[1].value, cfg);
           consume(times[1].index, times[1].end);
           consume(times[0].end, times[1].index);
+        }
+      }
+      // 「10時から30分」「10:00から1時間」のような所要時間
+      if (!endTime) {
+        var tail = work.substring(times[0].end, times[0].end + 12);
+        var dm = /^\s*(?:から|~|-|、|で)?\s*(\d{1,3})\s*(分|時間)/.exec(tail);
+        if (dm) {
+          durationMinutes = (+dm[1]) * (dm[2] === '時間' ? 60 : 1);
+          consume(times[0].end + dm.index, times[0].end + dm.index + dm[0].length);
         }
       }
       consume(times[0].index, times[0].end);
@@ -377,7 +436,8 @@ var Parser = (function () {
         if (e.getTime() <= s.getTime()) e = new Date(e.getTime() + 12 * 60 * 60 * 1000);   // 10時~1時
         if (e.getTime() <= s.getTime()) e = new Date(e.getTime() + 12 * 60 * 60 * 1000);   // 日跨ぎ
       } else {
-        e = new Date(s.getTime() + cfg.defaultDurationMinutes * 60 * 1000);
+        var minutes = durationMinutes || startTime.durationMinutes || cfg.defaultDurationMinutes;
+        e = new Date(s.getTime() + minutes * 60 * 1000);
       }
       event.start = s;
       event.end = e;
@@ -389,6 +449,20 @@ var Parser = (function () {
       event.endDateExclusive = ymd(addDays(endDate || startDate, 1));
       event.start = startDate;
       event.end = addDays(endDate || startDate, 1);
+    }
+
+    if (recurrence) {
+      // 曜日指定（平日など）に合わない開始日なら、最初に該当する日まで進める
+      if (recurrence.byDay && recurrence.byDay.length) {
+        for (var g = 0; g < 7 && recurrence.byDay.indexOf(WEEKDAY_CODE[event.start.getDay()]) === -1; g++) {
+          shiftEventByDays(event, 1);
+        }
+      } else if (recurrence.freq === 'WEEKLY') {
+        recurrence.byDay = [WEEKDAY_CODE[event.start.getDay()]];
+      }
+      if (recurrence.freq === 'MONTHLY') recurrence.byMonthDay = event.start.getDate();
+      recurrence.count = (cfg.recurrenceCounts && cfg.recurrenceCounts[recurrence.freq]) || 26;
+      event.recurrence = recurrence;
     }
 
     // 未来すぎる / 過ぎた予定は捨てる
@@ -450,11 +524,23 @@ var Parser = (function () {
   }
 
   /** ログ用の 1 行表現。 */
+  var FREQ_LABEL = { DAILY: '毎日', WEEKLY: '毎週', MONTHLY: '毎月', YEARLY: '毎年' };
+
+  function recurrenceLabel(ev) {
+    if (!ev.recurrence) return '';
+    var label = FREQ_LABEL[ev.recurrence.freq] || '繰り返し';
+    if (ev.recurrence.interval === 2 && ev.recurrence.freq === 'WEEKLY') label = '隔週';
+    return ' [' + label + '×' + ev.recurrence.count + ']';
+  }
+
   function describe(ev) {
-    if (ev.allDay) return '[終日] ' + ev.startDate + (ev.endDateExclusive ? ' ~ ' + ev.endDateExclusive : '') + ' ' + ev.title;
+    if (ev.allDay) {
+      return '[終日] ' + ev.startDate + (ev.endDateExclusive ? ' ~ ' + ev.endDateExclusive : '') +
+        ' ' + ev.title + recurrenceLabel(ev);
+    }
     return ymd(ev.start) + ' ' + pad2(ev.start.getHours()) + ':' + pad2(ev.start.getMinutes()) +
       '-' + pad2(ev.end.getHours()) + ':' + pad2(ev.end.getMinutes()) + ' ' + ev.title +
-      (ev.location ? ' @' + ev.location : '');
+      (ev.location ? ' @' + ev.location : '') + recurrenceLabel(ev);
   }
 
   return {

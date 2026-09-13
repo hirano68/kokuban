@@ -262,6 +262,71 @@ function removeTriggers() {
   return removed;
 }
 
+/**
+ * 設定と接続まわりをまとめて点検する。導入時とトラブル時に最初に実行する。
+ */
+function checkSetup() {
+  var lines = ['===== chat-to-calendar セットアップ点検 ====='];
+  var cfg;
+  try {
+    cfg = getConfig();
+    lines.push('✅ 設定の読み込み OK');
+  } catch (err) {
+    lines.push('❌ 設定エラー: ' + err);
+    Logger.log(lines.join('\n'));
+    return lines.join('\n');
+  }
+
+  var scriptTz = Session.getScriptTimeZone();
+  lines.push((scriptTz === cfg.timeZone ? '✅' : '⚠️') +
+    ' スクリプトのタイムゾーン: ' + scriptTz + '（設定: ' + cfg.timeZone + '）');
+
+  try {
+    if (typeof Calendar === 'undefined' || !Calendar.Events) {
+      throw new Error('拡張サービス「Calendar API」が追加されていません');
+    }
+    Calendar.Events.list(cfg.calendarId, { maxResults: 1, timeMin: rfc3339_(new Date(), cfg.timeZone) });
+    lines.push('✅ カレンダー「' + cfg.calendarId + '」にアクセスできます');
+  } catch (err) {
+    lines.push('❌ カレンダー: ' + err);
+  }
+
+  try {
+    var spaces = ChatSource.listSpaces(cfg);
+    lines.push('✅ Google Chat に接続できます（参加スペース ' + spaces.length + ' 件）');
+    var targets = ChatSource.resolveTargetSpaces(cfg);
+    lines.push('　  監視対象: ' + targets.length + ' スペース' +
+      ((cfg.spaces && cfg.spaces.length) ? '（設定で指定）' : '（参加中の全スペース）'));
+    if (!targets.length) lines.push('⚠️ 監視対象が 0 件です。スペースに参加しているか確認してください');
+  } catch (err) {
+    lines.push('❌ Google Chat: ' + err);
+  }
+
+  var triggers = ScriptApp.getProjectTriggers().filter(function (t) {
+    return t.getHandlerFunction() === 'syncNow';
+  });
+  lines.push((triggers.length ? '✅' : '⚠️') + ' 自動実行トリガー: ' + triggers.length + ' 件' +
+    (triggers.length ? '（' + cfg.pollIntervalMinutes + ' 分間隔）' : '（installTriggers を実行してください）'));
+
+  lines.push(cfg.dryRun
+    ? '⚠️ dryRun=true のためカレンダーには書き込みません（試運転モード）'
+    : '✅ 本番モード（dryRun=false）');
+  lines.push('　  キーワード判定: ' + (cfg.requireKeyword ? 'あり（' + cfg.keywords.length + ' 語）' : 'なし（日時があれば登録）'));
+  lines.push('　  繰り返し予定: ' + (cfg.allowRecurring === false ? '作らない' : '作る'));
+
+  try {
+    var t = Tests.run();
+    lines.push((t.failures.length ? '❌' : '✅') + ' 読み取りルールのテスト ' + t.passed + '/' + t.total);
+    t.failures.forEach(function (f) { lines.push('　  ' + f); });
+  } catch (err) {
+    lines.push('⚠️ テストを実行できませんでした: ' + err);
+  }
+
+  lines.push('--- 次の一手: previewOnly() で実際のメッセージから何が拾われるか確認 ---');
+  Logger.log(lines.join('\n'));
+  return lines.join('\n');
+}
+
 /** 取り込み位置と処理済み記録を消す（最初から読み直したいとき）。 */
 function resetState() {
   var n = Store.reset();
