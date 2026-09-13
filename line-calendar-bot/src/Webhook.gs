@@ -68,9 +68,10 @@ function handleWebhookEvent_(cfg, event) {
     lineReply_(cfg.accessToken, event.replyToken, [helpText_(cfg, ctx)]);
     return;
   }
-  if (event.type !== 'message' || !event.message || event.message.type !== 'text') {
-    return; // スタンプ・画像などは対象外
-  }
+  var isText = event.type === 'message' && event.message && event.message.type === 'text';
+  var isPostback = event.type === 'postback' && event.postback;
+  if (!isText && !isPostback) return; // スタンプ・画像などは対象外
+
   if (!isAllowedSource_(cfg, ctx)) {
     console.warn('許可されていないトークからの受信: ' + ctx.sourceId);
     lineReply_(cfg.accessToken, event.replyToken,
@@ -78,7 +79,9 @@ function handleWebhookEvent_(cfg, event) {
     return;
   }
 
-  var replies = handleTextMessage_(cfg, ctx, event.message.text);
+  var replies = isPostback
+    ? handlePostback_(cfg, ctx, event.postback.data)
+    : handleTextMessage_(cfg, ctx, event.message.text);
   if (replies.length) lineReply_(cfg.accessToken, event.replyToken, replies);
 }
 

@@ -90,3 +90,45 @@ function trimLastEvents_(map) {
   keys.slice(0, 50).forEach(function (k) { trimmed[k] = map[k]; });
   return trimmed;
 }
+
+/* ------------------------------------------------------------------ *
+ * 確認待ちの予定（ボタンを押すまで登録しない）
+ * ------------------------------------------------------------------ */
+
+var PENDING_TTL_SECONDS = 21600; // CacheService の上限（6時間）
+
+/**
+ * 解析済みの予定を一時保存し、postback に載せる短いキーを返す。
+ * postback の data は 300 バイトまでなので、本体はキャッシュに置いてキーだけ渡す。
+ */
+function storePendingSchedules_(sourceId, schedules) {
+  var key = 'pending_' + Utilities.getUuid().replace(/-/g, '').substring(0, 20);
+  var payload = {
+    sourceId: sourceId,
+    schedules: schedules.map(function (s) {
+      return {
+        title: s.title, start: s.start.toISOString(), end: s.end.toISOString(),
+        allDay: s.allDay, location: s.location, source: s.source
+      };
+    })
+  };
+  CacheService.getScriptCache().put(key, JSON.stringify(payload), PENDING_TTL_SECONDS);
+  return key;
+}
+
+/** 一時保存した予定を取り出して消す（二重登録を防ぐため取り出しは 1 回だけ）。 */
+function takePendingSchedules_(key) {
+  if (!key) return null;
+  var cache = CacheService.getScriptCache();
+  var raw = cache.get(key);
+  if (!raw) return null;
+  cache.remove(key);
+  var data = JSON.parse(raw);
+  data.schedules = data.schedules.map(function (s) {
+    return {
+      title: s.title, start: new Date(s.start), end: new Date(s.end),
+      allDay: s.allDay, location: s.location, source: s.source
+    };
+  });
+  return data;
+}

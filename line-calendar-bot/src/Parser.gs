@@ -242,13 +242,20 @@ function extractDates_(norm, base, consumed) {
   var picked = pickNonOverlapping_(cands);
   if (!picked.length) return [];
 
-  var dates = [{ date: picked[0].resolve(base), start: picked[0].start, end: picked[0].end }];
+  var dates = [{
+    date: picked[0].resolve(base), start: picked[0].start, end: picked[0].end,
+    // 優先度 4 以上 = 年月日・月日・相対語・週＋曜日。それ未満は「15日」「月曜」だけの弱い手がかり
+    strength: picked[0].priority >= 4 ? 'strong' : 'weak'
+  }];
   markConsumed_(consumed, picked[0].start, picked[0].end);
 
   if (picked.length > 1) {
     var gap = norm.substring(picked[0].end, picked[1].start);
     if (/^\s*(?:-|から|より)\s*$/.test(gap)) {
-      dates.push({ date: picked[1].resolve(base), start: picked[1].start, end: picked[1].end });
+      dates.push({
+        date: picked[1].resolve(base), start: picked[1].start, end: picked[1].end,
+        strength: picked[1].priority >= 4 ? 'strong' : 'weak'
+      });
       markConsumed_(consumed, picked[0].end, picked[1].end);
     }
   }
@@ -522,8 +529,23 @@ function parseSchedule(text, now, options) {
     allDay: allDay,
     location: location,
     hasExplicitTitle: !!title,
+    confidence: judgeConfidence_(dates, times.length > 0, allDayMarked),
     source: raw.trim()
   };
+}
+
+/**
+ * 「これは予定の告知か、ただの会話か」の目安。
+ * キーワードなしで投稿を拾うとき、どこから反応するかの閾値に使う。
+ *   high   … 明示的な日付があり、時刻または終日の指定もある（例: 9/15 14:00 打合せ）
+ *   medium … 明示的な日付だけ、または「15日」「月曜」＋時刻
+ *   low    … 時刻だけ、または「15日」「月曜」だけ
+ */
+function judgeConfidence_(dates, hasTime, allDayMarked) {
+  var strength = dates.length ? dates[0].strength : 'none';
+  if (strength === 'strong' && (hasTime || allDayMarked)) return 'high';
+  if (strength === 'strong' || (strength === 'weak' && hasTime)) return 'medium';
+  return 'low';
 }
 
 /**

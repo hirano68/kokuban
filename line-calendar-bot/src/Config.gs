@@ -10,7 +10,9 @@ var PROP = {
   CALENDAR_ID: 'CALENDAR_ID',                // 既定の登録先カレンダー（省略時は primary）
   SOURCE_CALENDAR_MAP: 'SOURCE_CALENDAR_MAP',// {"<LINEのID>":"<カレンダーID>"} の JSON
   ALLOWED_SOURCE_IDS: 'ALLOWED_SOURCE_IDS',  // 許可する LINE の ID（カンマ区切り、空なら全許可）
-  GROUP_TRIGGER: 'GROUP_TRIGGER',            // グループで反応する先頭キーワード（既定: 予定）
+  GROUP_TRIGGER: 'GROUP_TRIGGER',            // 付けると確認なしで即登録するキーワード（既定: 予定）
+  CONFIRM_BEFORE_CREATE: 'CONFIRM_BEFORE_CREATE', // group（既定） / always / never
+  GROUP_MIN_CONFIDENCE: 'GROUP_MIN_CONFIDENCE',   // グループで拾い始める確からしさ high（既定）/ medium / low
   DEFAULT_DURATION: 'DEFAULT_DURATION_MINUTES',
   LAST_EVENTS: 'LAST_EVENTS'                 // 「取消」用に直前の登録内容を保持する内部キー
 };
@@ -31,6 +33,8 @@ function getConfig_() {
       .split(',').map(function (s) { return s.trim(); })
       .filter(function (s) { return s.length > 0; }),
     groupTrigger: p.getProperty(PROP.GROUP_TRIGGER) || '予定',
+    confirmBeforeCreate: p.getProperty(PROP.CONFIRM_BEFORE_CREATE) || 'group',
+    groupMinConfidence: p.getProperty(PROP.GROUP_MIN_CONFIDENCE) || 'high',
     defaultDurationMinutes: isNaN(duration) ? PARSER_CONFIG.defaultDurationMinutes : duration,
     timeZone: Session.getScriptTimeZone() || 'Asia/Tokyo'
   };

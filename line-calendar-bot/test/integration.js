@@ -25,6 +25,7 @@ function buildSandbox() {
   };
 
   let eventSeq = 0;
+  let uuidSeq = 1;
 
   function makeCalendar(id) {
     const events = [];
@@ -86,7 +87,8 @@ function buildSandbox() {
     CacheService: {
       getScriptCache: () => ({
         get: (k) => (state.cache.has(k) ? state.cache.get(k) : null),
-        put: (k, v) => { state.cache.set(k, v); }
+        put: (k, v) => { state.cache.set(k, v); },
+        remove: (k) => { state.cache.delete(k); }
       })
     },
     CalendarApp: {
@@ -101,6 +103,7 @@ function buildSandbox() {
       }
     },
     Utilities: {
+      getUuid: () => 'uuid-' + (uuidSeq++).toString().padStart(8, '0') + '-aaaa-bbbb-cccc',
       formatDate: (d, tz, fmt) => fmt
         .replace(/yyyy/g, d.getFullYear())
         .replace(/MM/g, pad(d.getMonth() + 1, 2))
@@ -181,7 +184,34 @@ function post(env, events, token) {
 const USER = { type: 'user', userId: 'Uuser123' };
 const GROUP = { type: 'group', groupId: 'Cgroup456', userId: 'Uuser123' };
 
-const replies = (env) => env.state.sent.map((s) => s.payload.messages.map((m) => m.text).join('\n'));
+const replies = (env) => env.state.sent.map((s) => s.payload.messages
+  .map((m) => (m.type === 'template' ? m.template.text : m.text)).join('\n'));
+
+/** 直近に送った確認メッセージのボタン（postback）を取り出す。 */
+function lastConfirmActions(env) {
+  for (let i = env.state.sent.length - 1; i >= 0; i--) {
+    const m = env.state.sent[i].payload.messages[0];
+    if (m && m.type === 'template' && m.template.type === 'confirm') return m.template.actions;
+  }
+  return null;
+}
+
+function postPostback(env, data, source) {
+  return env.sandbox.doPost({
+    parameter: { token: TOKEN },
+    postData: {
+      contents: JSON.stringify({
+        events: [{
+          type: 'postback',
+          webhookEventId: 'pb' + (++msgSeq),
+          replyToken: 'rt' + msgSeq,
+          source: source,
+          postback: { data: data }
+        }]
+      })
+    }
+  });
+}
 const liveEvents = (env, id) => (env.state.calendars.get(id || 'primary') || { _events: [] })
   ._events.filter((e) => !e.deleted);
 
@@ -221,20 +251,91 @@ const liveEvents = (env, id) => (env.state.calendars.get(id || 'primary') || { _
   check('再送: 二重登録しない', liveEvents(env).length, 1);
 })();
 
-// 4. グループ: キーワードなしは無反応
+// 4. グループ: 通常の投稿は拾って確認する（押すまで登録しない）
 (function () {
   const env = setup();
-  post(env, [textEvent('9/15 14:00 に飲みに行こう', GROUP)]);
-  check('グループ: 無反応（登録なし）', liveEvents(env).length, 0);
-  check('グループ: 無反応（返信なし）', env.state.sent.length, 0);
+  post(env, [textEvent('9/15 14:00から現場定例やります', GROUP)]);
+  check('確認: この時点では登録しない', liveEvents(env).length, 0);
+  const actions = lastConfirmActions(env);
+  assertTrue('確認: 確認メッセージを送る', !!actions);
+  assertTrue('確認: 内容を提示', (replies(env)[0] || '').includes('9/15(火) 14:00'));
+  check('確認: ボタンは2つ', actions.length, 2);
+  check('確認: ボタン名', actions.map((a) => a.label).join('/'), '登録/やめる');
+  assertTrue('確認: postback data は300バイト以内',
+    actions.every((a) => Buffer.byteLength(a.data, 'utf8') <= 300));
+
+  // 「登録」を押す
+  postPostback(env, actions[0].data, GROUP);
+  check('確認: 押したら登録される', liveEvents(env).length, 1);
+  check('確認: 件名', liveEvents(env)[0].title, '現場定例やります');
+  assertTrue('確認: 登録完了を返信', (replies(env)[1] || '').includes('登録しました'));
+
+  // 同じボタンをもう一度押しても二重登録しない
+  postPostback(env, actions[0].data, GROUP);
+  check('確認: 二重登録しない', liveEvents(env).length, 1);
+  assertTrue('確認: 期限切れを案内', (replies(env)[2] || '').includes('期限切れ'));
 })();
 
-// 5. グループ: キーワード付き。トークごとのカレンダー振り分けも確認
+// 4b. 「やめる」を押した場合
+(function () {
+  const env = setup();
+  post(env, [textEvent('明日 10:00 打合せしましょう', GROUP)]);
+  const actions = lastConfirmActions(env);
+  postPostback(env, actions[1].data, GROUP);
+  check('やめる: 登録されない', liveEvents(env).length, 0);
+  assertTrue('やめる: 応答', (replies(env)[1] || '').includes('登録しませんでした'));
+  // 取り消した確認は「登録」を押しても復活しない
+  postPostback(env, actions[0].data, GROUP);
+  check('やめる: あとから登録されない', liveEvents(env).length, 0);
+})();
+
+// 4c. 確認を出したトーク以外からの応答は受け付けない
+(function () {
+  const env = setup();
+  post(env, [textEvent('9/15 14:00 現場定例', GROUP)]);
+  const actions = lastConfirmActions(env);
+  postPostback(env, actions[0].data, USER);
+  check('別トークからの応答: 登録されない', liveEvents(env).length, 0);
+})();
+
+// 4d. 日常会話（確からしさが足りないもの）には反応しない
+(function () {
+  const env = setup();
+  const chatter = [
+    '15日分の請求書送りました',
+    '10時には着きます',
+    '了解です！',
+    '3日間ありがとうございました'
+  ];
+  chatter.forEach((textBody) => post(env, [textEvent(textBody, GROUP)]));
+  check('雑談: 登録なし', liveEvents(env).length, 0);
+  check('雑談: 返信なし', env.state.sent.length, 0);
+})();
+
+// 5. グループ: キーワード付きは確認なしで即登録。カレンダー振り分けも確認
 (function () {
   const env = setup({ SOURCE_CALENDAR_MAP: JSON.stringify({ Cgroup456: 'genba@group.calendar.google.com' }) });
   post(env, [textEvent('予定 9/15 14:00 現場打合せ', GROUP)]);
-  check('グループ: 既定カレンダーには入らない', liveEvents(env, 'primary').length, 0);
-  check('グループ: 振り分け先に入る', liveEvents(env, 'genba@group.calendar.google.com').length, 1);
+  check('キーワード: 確認を挟まない', liveEvents(env, 'genba@group.calendar.google.com').length, 1);
+  check('キーワード: 既定カレンダーには入らない', liveEvents(env, 'primary').length, 0);
+  assertTrue('キーワード: 登録完了を返信', (replies(env)[0] || '').includes('登録しました'));
+})();
+
+// 5b. CONFIRM_BEFORE_CREATE で個人トークでも確認できる
+(function () {
+  const env = setup({ CONFIRM_BEFORE_CREATE: 'always' });
+  post(env, [textEvent('9/15 14:00 打合せ', USER)]);
+  check('always: 押すまで登録しない', liveEvents(env).length, 0);
+  const actions = lastConfirmActions(env);
+  postPostback(env, actions[0].data, USER);
+  check('always: 押したら登録', liveEvents(env).length, 1);
+})();
+
+// 5c. GROUP_MIN_CONFIDENCE を下げると日付だけの投稿も拾う
+(function () {
+  const env = setup({ GROUP_MIN_CONFIDENCE: 'medium' });
+  post(env, [textEvent('9/20 安全パトロール', GROUP)]);
+  assertTrue('medium: 日付だけでも確認を出す', !!lastConfirmActions(env));
 })();
 
 // 6. 取消
@@ -265,6 +366,7 @@ const liveEvents = (env, id) => (env.state.calendars.get(id || 'primary') || { _
   post(env, [textEvent('ID', GROUP)]);
   assertTrue('ID: グループIDを返す', (replies(env)[0] || '').includes('Cgroup456'));
   post(env, [textEvent('ヘルプ', GROUP)]);
+  assertTrue('ヘルプ: 確認フローの説明', (replies(env)[1] || '').includes('登録しますか？'));
   assertTrue('ヘルプ: キーワード案内', (replies(env)[1] || '').includes('先頭に「予定」'));
 })();
 
