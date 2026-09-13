@@ -61,8 +61,15 @@ LINE Messaging API と Google Apps Script（GAS）だけで動き、サーバー
 ### 2. Google Apps Script プロジェクトを作る
 
 1. [script.google.com](https://script.google.com/) で **新しいプロジェクト** を作成する。
-2. `src/` 配下の各 `.gs` ファイルを、同じ名前でプロジェクトに作成して中身を貼り付ける。
-   - `Parser.gs` / `Config.gs` / `LineClient.gs` / `CalendarService.gs` / `Commands.gs` / `Webhook.gs` / `Tests.gs`
+2. コードを貼り付ける。**手で貼るなら 1 ファイル版が早いです。**
+
+   | やり方 | 手順 |
+   | --- | --- |
+   | **1ファイル版（おすすめ）** | 最初からある `コード.gs` を開き、中身を全部消して [`dist/Code.gs`](dist/Code.gs) の中身を丸ごと貼り付ける。これだけ |
+   | ファイル分割版 | `src/` の各 `.gs` を同じ名前でプロジェクトに作成して貼り付ける（`Parser.gs` / `Config.gs` / `LineClient.gs` / `CalendarService.gs` / `Commands.gs` / `Webhook.gs` / `Tests.gs`） |
+
+   `dist/Code.gs` は `src/` を結合しただけの自動生成物で、中身は同じです
+   （`node tools/build-single.js` で作り直せます）。
 3. 左の **プロジェクトの設定** を開き、**タイムゾーンが「(GMT+09:00) 日本標準時」** になっていることを確認する。
    （`appsscript.json` を編集する場合は「`appsscript.json` マニフェスト ファイルをエディタで表示する」にチェック）
 
@@ -259,8 +266,15 @@ var PARSER_CONFIG = {
 
 ```bash
 cd line-calendar-bot
-node test/run.js          # 日本語の日付・時刻の解析（120項目）
-node test/integration.js  # Webhook受信→確認→登録→返信までの通し確認（56項目）
+node test/run.js                  # 日本語の日付・時刻の解析（120項目）
+node test/integration.js         # Webhook受信→確認→登録→返信までの通し確認（56項目）
+BUNDLE=1 node test/integration.js  # 結合版 dist/Code.gs が src と同じ動きか確認
+```
+
+`src/` を直したら、1 ファイル版も作り直してください。
+
+```bash
+node tools/build-single.js
 ```
 
 `test/integration.js` は `CalendarApp` や `UrlFetchApp` などの GAS のサービスを差し替えて実行するため、

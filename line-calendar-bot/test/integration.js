@@ -131,8 +131,14 @@ function buildSandbox() {
     Date = FakeDate;
   `, ctx);
 
-  ['Parser.gs', 'Config.gs', 'LineClient.gs', 'CalendarService.gs', 'Commands.gs', 'Webhook.gs']
-    .forEach((f) => vm.runInContext(fs.readFileSync(path.join(SRC, f), 'utf8'), ctx, { filename: f }));
+  if (process.env.BUNDLE === '1') {
+    // 結合版（dist/Code.gs）が src と同じ動きをするか確認する
+    const bundle = path.join(__dirname, '..', 'dist', 'Code.gs');
+    vm.runInContext(fs.readFileSync(bundle, 'utf8'), ctx, { filename: 'Code.gs' });
+  } else {
+    ['Parser.gs', 'Config.gs', 'LineClient.gs', 'CalendarService.gs', 'Commands.gs', 'Webhook.gs']
+      .forEach((f) => vm.runInContext(fs.readFileSync(path.join(SRC, f), 'utf8'), ctx, { filename: f }));
+  }
 
   return { ctx, state, sandbox };
 }
