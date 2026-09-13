@@ -64,18 +64,21 @@ function handleWebhookEvent_(cfg, event) {
 
   var ctx = sourceContext_(event);
 
-  if (event.type === 'join' || event.type === 'follow') {
-    lineReply_(cfg.accessToken, event.replyToken, [helpText_(cfg, ctx)]);
-    return;
-  }
+  var isGreeting = event.type === 'join' || event.type === 'follow';
   var isText = event.type === 'message' && event.message && event.message.type === 'text';
-  var isPostback = event.type === 'postback' && event.postback;
-  if (!isText && !isPostback) return; // スタンプ・画像などは対象外
+  var isPostback = event.type === 'postback' && !!event.postback;
+  if (!isGreeting && !isText && !isPostback) return; // スタンプ・画像などは対象外
 
+  // 招待・友だち追加の時点で弾く。ID を返すので、許可リストへの追加もここから行える
   if (!isAllowedSource_(cfg, ctx)) {
     console.warn('許可されていないトークからの受信: ' + ctx.sourceId);
     lineReply_(cfg.accessToken, event.replyToken,
       ['このトークからの登録は許可されていません。\n管理者に次の ID を伝えてください。\n' + ctx.sourceId]);
+    return;
+  }
+
+  if (isGreeting) {
+    lineReply_(cfg.accessToken, event.replyToken, [helpText_(cfg, ctx)]);
     return;
   }
 

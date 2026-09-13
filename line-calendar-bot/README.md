@@ -127,6 +127,9 @@ GAS の **プロジェクトの設定 → スクリプト プロパティ** で�
 https://script.google.com/macros/s/＊＊＊/exec?token=ここにWEBHOOK_TOKENの値
 ```
 
+**GAS エディタで `showWebhookUrl()` を実行すると、この URL が組み立てられてログに出ます。**
+（関数の一覧から `showWebhookUrl` を選んで「実行」→ 下部の実行ログにコピーできる形で表示されます）
+
 これを LINE Developers の **Messaging API設定 → Webhook URL** に貼り付けて **更新** します。
 
 > **「検証」ボタンはエラーになることがあります。**
@@ -267,7 +270,7 @@ var PARSER_CONFIG = {
 ```bash
 cd line-calendar-bot
 node test/run.js                  # 日本語の日付・時刻の解析（120項目）
-node test/integration.js         # Webhook受信→確認→登録→返信までの通し確認（56項目）
+node test/integration.js         # Webhook受信→確認→登録→返信までの通し確認（68項目）
 BUNDLE=1 node test/integration.js  # 結合版 dist/Code.gs が src と同じ動きか確認
 ```
 
@@ -280,9 +283,14 @@ node tools/build-single.js
 `test/integration.js` は `CalendarApp` や `UrlFetchApp` などの GAS のサービスを差し替えて実行するため、
 実際の LINE やカレンダーには一切アクセスしません。
 
-GAS エディタからは `Tests.gs` の `runParserTests()` で同様の確認ができます。
-`tryParse("9/15 14:00 打合せ")` を実行すると、カレンダーに登録せずに解析結果だけを確認できます。
-設定の確認は `Config.gs` の `checkConfiguration()` を実行してください。
+GAS エディタからは、関数を選んで「実行」すると次の確認ができます。
+
+| 関数 | 内容 |
+| --- | --- |
+| `checkConfiguration()` | 設定の不備（トークン未設定、カレンダーが開けない、タイムゾーン、値の書き間違い）をまとめて表示 |
+| `showWebhookUrl()` | LINE に貼り付ける Webhook URL を組み立てて表示 |
+| `runParserTests()` | 解析ロジックの動作確認 |
+| `tryParse("9/15 14:00 打合せ")` | カレンダーに登録せず、解析結果だけを確認 |
 
 ---
 
@@ -307,6 +315,7 @@ GAS エディタからは `Tests.gs` の `runParserTests()` で同様の確認�
 | グループで反応しない | グループ参加が「許可する」になっているか。日付＋時刻が揃っているか（[どこから拾うか](#どこから拾うか誤反応の調整)）。先頭に `予定` を付ければ必ず登録します |
 | グループで反応しすぎる | `GROUP_MIN_CONFIDENCE` を `high` のままにする。特定のトークだけ使いたい場合は `ALLOWED_SOURCE_IDS` を設定する |
 | カレンダーに入らない | `CALENDAR_ID` が正しいか。GAS で `checkConfiguration()` を実行して確認 |
+| Webhook URL が分からない | GAS エディタで `showWebhookUrl()` を実行する |
 | コードを直したのに反映されない | **デプロイ → デプロイを管理 → 編集（鉛筆）→ バージョン「新バージョン」→ デプロイ** で再デプロイする |
 | 時刻が 9 時間ずれる | GAS プロジェクトのタイムゾーンが「日本標準時」か |
 

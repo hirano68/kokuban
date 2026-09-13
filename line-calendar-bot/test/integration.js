@@ -21,7 +21,10 @@ function buildSandbox() {
     cache: new Map(),
     calendars: new Map(),
     sent: [],
-    logs: []
+    logs: [],
+    lockTaken: 0,
+    lockReleased: 0,
+    webAppUrl: 'https://script.google.com/macros/s/AKfyTEST/exec'
   };
 
   let eventSeq = 0;
@@ -96,6 +99,13 @@ function buildSandbox() {
       getCalendarById: (id) => calendar(id)
     },
     Session: { getScriptTimeZone: () => 'Asia/Tokyo' },
+    LockService: {
+      getScriptLock: () => ({
+        tryLock: () => { state.lockTaken++; return true; },
+        releaseLock: () => { state.lockReleased++; }
+      })
+    },
+    ScriptApp: { getService: () => ({ getUrl: () => state.webAppUrl }) },
     UrlFetchApp: {
       fetch: (url, opts) => {
         state.sent.push({ url, payload: JSON.parse(opts.payload) });
@@ -431,6 +441,66 @@ const liveEvents = (env, id) => (env.state.calendars.get(id || 'primary') || { _
   check('本文なし: ok', JSON.parse(r1.getContent()).ok, true);
   const r2 = env.sandbox.doPost({ parameter: { token: TOKEN }, postData: { contents: '{壊れた' } });
   check('不正JSON: 200を返す', JSON.parse(r2.getContent()).ok, true);
+})();
+
+// 15. 許可リストは招待・友だち追加の時点で効く
+(function () {
+  const env = setup({ ALLOWED_SOURCE_IDS: 'Cother999' });
+  env.sandbox.doPost({
+    parameter: { token: TOKEN },
+    postData: { contents: JSON.stringify({ events: [{ type: 'join', webhookEventId: 'j1', replyToken: 'rt', source: GROUP }] }) }
+  });
+  const r = replies(env)[0] || '';
+  assertTrue('許可リスト: 招待時に拒否', r.includes('許可されていません'));
+  assertTrue('許可リスト: 追加用にIDを返す', r.includes('Cgroup456'));
+})();
+
+// 16. 取消の記録はロックを取ってから読み書きする
+(function () {
+  const env = setup();
+  post(env, [textEvent('9/15 14:00 打合せ', USER)]);
+  post(env, [textEvent('取消', USER)]);
+  check('ロック: 登録と取消で取得', env.state.lockTaken, 2);
+  check('ロック: 取得したぶんだけ解放', env.state.lockReleased, env.state.lockTaken);
+})();
+
+// 17. Webhook URL の組み立て
+(function () {
+  const env = setup();
+  const url = env.sandbox.showWebhookUrl();
+  check('URL: exec と合言葉が付く', url,
+    'https://script.google.com/macros/s/AKfyTEST/exec?token=' + TOKEN);
+
+  // 開発用の /dev が返ってきても公開版の /exec に直す
+  env.state.webAppUrl = 'https://script.google.com/macros/s/AKfyTEST/dev';
+  assertTrue('URL: /dev を /exec に直す', env.sandbox.showWebhookUrl().includes('/exec?token='));
+
+  // 未デプロイ
+  env.state.webAppUrl = null;
+  assertTrue('URL: 未デプロイを案内', env.sandbox.showWebhookUrl().includes('デプロイされていません'));
+
+  const noToken = setup();
+  noToken.state.props.delete('WEBHOOK_TOKEN');
+  assertTrue('URL: 合言葉未設定を案内', noToken.sandbox.showWebhookUrl().includes('未設定'));
+})();
+
+// 18. 設定チェック
+(function () {
+  const env = setup();
+  assertTrue('設定チェック: 正常', env.sandbox.checkConfiguration().includes('設定は正常です'));
+
+  const bad = setup({ GROUP_MIN_CONFIDENCE: 'たかめ' });
+  assertTrue('設定チェック: 閾値の誤りを検出',
+    bad.sandbox.checkConfiguration().includes('GROUP_MIN_CONFIDENCE'));
+
+  const bad2 = setup({ CONFIRM_BEFORE_CREATE: 'yes' });
+  assertTrue('設定チェック: 確認設定の誤りを検出',
+    bad2.sandbox.checkConfiguration().includes('CONFIRM_BEFORE_CREATE'));
+
+  const noToken = setup();
+  noToken.state.props.delete('LINE_CHANNEL_ACCESS_TOKEN');
+  assertTrue('設定チェック: トークン未設定を検出',
+    noToken.sandbox.checkConfiguration().includes('LINE_CHANNEL_ACCESS_TOKEN'));
 })();
 
 /* ------------------------------------------------------------------ *

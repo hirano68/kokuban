@@ -63,22 +63,47 @@ function deleteEventById_(calendarId, eventId) {
  * 「取消」用の直前登録の記録
  * ------------------------------------------------------------------ */
 
+/**
+ * スクリプトプロパティの読み取り→書き戻しを直列化する。
+ * グループでは複数人の投稿がほぼ同時に届くことがあり、GAS はそれを並行実行するため、
+ * ロックしないと後勝ちで他方の記録が消える。取れなくても処理自体は続行する。
+ */
+function withScriptLock_(fn) {
+  var lock = LockService.getScriptLock();
+  var locked = false;
+  try {
+    locked = lock.tryLock(10000);
+    if (!locked) console.warn('ロックを取得できませんでした。そのまま続行します。');
+  } catch (err) {
+    console.warn('ロックの取得に失敗: ' + err);
+  }
+  try {
+    return fn();
+  } finally {
+    if (locked) lock.releaseLock();
+  }
+}
+
 function rememberLastEvents_(sourceId, calendarId, eventIds) {
   if (!sourceId || !eventIds.length) return;
-  var props = getProps_();
-  var map = parseJsonProperty_(props.getProperty(PROP.LAST_EVENTS));
-  map[sourceId] = { calendarId: calendarId, eventIds: eventIds, at: new Date().toISOString() };
-  props.setProperty(PROP.LAST_EVENTS, JSON.stringify(trimLastEvents_(map)));
+  withScriptLock_(function () {
+    var props = getProps_();
+    var map = parseJsonProperty_(props.getProperty(PROP.LAST_EVENTS));
+    map[sourceId] = { calendarId: calendarId, eventIds: eventIds, at: new Date().toISOString() };
+    props.setProperty(PROP.LAST_EVENTS, JSON.stringify(trimLastEvents_(map)));
+  });
 }
 
 function takeLastEvents_(sourceId) {
-  var props = getProps_();
-  var map = parseJsonProperty_(props.getProperty(PROP.LAST_EVENTS));
-  var entry = map[sourceId];
-  if (!entry) return null;
-  delete map[sourceId];
-  props.setProperty(PROP.LAST_EVENTS, JSON.stringify(map));
-  return entry;
+  return withScriptLock_(function () {
+    var props = getProps_();
+    var map = parseJsonProperty_(props.getProperty(PROP.LAST_EVENTS));
+    var entry = map[sourceId];
+    if (!entry) return null;
+    delete map[sourceId];
+    props.setProperty(PROP.LAST_EVENTS, JSON.stringify(map));
+    return entry;
+  });
 }
 
 /** スクリプトプロパティが肥大化しないよう、新しい順に 50 トークまでに保つ。 */

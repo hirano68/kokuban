@@ -51,6 +51,30 @@ function parseJsonProperty_(value) {
   }
 }
 
+/**
+ * LINE Developers に貼り付ける Webhook URL を組み立てて返す。
+ * GAS エディタから実行すると、ウェブアプリの URL に合言葉を付けたものがログに出る。
+ */
+function showWebhookUrl() {
+  var cfg = getConfig_();
+  if (!cfg.webhookToken) {
+    var missing = PROP.WEBHOOK_TOKEN + ' が未設定です。先にスクリプトプロパティを登録してください。';
+    console.log(missing);
+    return missing;
+  }
+  var base = ScriptApp.getService().getUrl();
+  if (!base) {
+    var notDeployed = 'まだウェブアプリとしてデプロイされていません。'
+      + '「デプロイ > 新しいデプロイ > ウェブアプリ」を先に行ってください。';
+    console.log(notDeployed);
+    return notDeployed;
+  }
+  // getUrl() は開発用の /dev を返すことがあるが、LINE に登録するのは公開版の /exec
+  var url = base.replace(/\/dev$/, '/exec') + '?token=' + encodeURIComponent(cfg.webhookToken);
+  console.log('LINE Developers の「Webhook URL」にこれを貼り付けてください:\n' + url);
+  return url;
+}
+
 /** 設定が揃っているか確認する。GAS エディタから直接実行して確認できる。 */
 function checkConfiguration() {
   var cfg = getConfig_();
@@ -62,9 +86,31 @@ function checkConfiguration() {
   } catch (err) {
     problems.push('カレンダー "' + cfg.calendarId + '" を開けません: ' + err.message);
   }
+  if (cfg.timeZone !== 'Asia/Tokyo') {
+    problems.push('タイムゾーンが ' + cfg.timeZone + ' です。'
+      + '「プロジェクトの設定」で「(GMT+09:00) 日本標準時」に変更してください。');
+  }
+  if (CONFIDENCE_RANK[cfg.groupMinConfidence] === undefined) {
+    problems.push(PROP.GROUP_MIN_CONFIDENCE + ' は high / medium / low のいずれかにしてください'
+      + '（現在: ' + cfg.groupMinConfidence + '）。');
+  }
+  if (['group', 'always', 'never'].indexOf(cfg.confirmBeforeCreate) < 0) {
+    problems.push(PROP.CONFIRM_BEFORE_CREATE + ' は group / always / never のいずれかにしてください'
+      + '（現在: ' + cfg.confirmBeforeCreate + '）。');
+  }
+
   var message = problems.length
     ? '設定に問題があります:\n - ' + problems.join('\n - ')
-    : '設定は正常です。タイムゾーン: ' + cfg.timeZone + ' / 既定カレンダー: ' + cfg.calendarId;
+    : [
+      '設定は正常です。',
+      '  タイムゾーン      : ' + cfg.timeZone,
+      '  既定カレンダー    : ' + cfg.calendarId,
+      '  確認を挟む範囲    : ' + cfg.confirmBeforeCreate,
+      '  グループの閾値    : ' + cfg.groupMinConfidence,
+      '  即登録キーワード  : ' + cfg.groupTrigger,
+      '  許可リスト        : ' + (cfg.allowedSourceIds.length
+        ? cfg.allowedSourceIds.join(', ') : '（未設定＝全許可）')
+    ].join('\n');
   console.log(message);
   return message;
 }

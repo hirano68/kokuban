@@ -652,6 +652,30 @@ function parseJsonProperty_(value) {
   }
 }
 
+/**
+ * LINE Developers に貼り付ける Webhook URL を組み立てて返す。
+ * GAS エディタから実行すると、ウェブアプリの URL に合言葉を付けたものがログに出る。
+ */
+function showWebhookUrl() {
+  var cfg = getConfig_();
+  if (!cfg.webhookToken) {
+    var missing = PROP.WEBHOOK_TOKEN + ' が未設定です。先にスクリプトプロパティを登録してください。';
+    console.log(missing);
+    return missing;
+  }
+  var base = ScriptApp.getService().getUrl();
+  if (!base) {
+    var notDeployed = 'まだウェブアプリとしてデプロイされていません。'
+      + '「デプロイ > 新しいデプロイ > ウェブアプリ」を先に行ってください。';
+    console.log(notDeployed);
+    return notDeployed;
+  }
+  // getUrl() は開発用の /dev を返すことがあるが、LINE に登録するのは公開版の /exec
+  var url = base.replace(/\/dev$/, '/exec') + '?token=' + encodeURIComponent(cfg.webhookToken);
+  console.log('LINE Developers の「Webhook URL」にこれを貼り付けてください:\n' + url);
+  return url;
+}
+
 /** 設定が揃っているか確認する。GAS エディタから直接実行して確認できる。 */
 function checkConfiguration() {
   var cfg = getConfig_();
@@ -663,9 +687,31 @@ function checkConfiguration() {
   } catch (err) {
     problems.push('カレンダー "' + cfg.calendarId + '" を開けません: ' + err.message);
   }
+  if (cfg.timeZone !== 'Asia/Tokyo') {
+    problems.push('タイムゾーンが ' + cfg.timeZone + ' です。'
+      + '「プロジェクトの設定」で「(GMT+09:00) 日本標準時」に変更してください。');
+  }
+  if (CONFIDENCE_RANK[cfg.groupMinConfidence] === undefined) {
+    problems.push(PROP.GROUP_MIN_CONFIDENCE + ' は high / medium / low のいずれかにしてください'
+      + '（現在: ' + cfg.groupMinConfidence + '）。');
+  }
+  if (['group', 'always', 'never'].indexOf(cfg.confirmBeforeCreate) < 0) {
+    problems.push(PROP.CONFIRM_BEFORE_CREATE + ' は group / always / never のいずれかにしてください'
+      + '（現在: ' + cfg.confirmBeforeCreate + '）。');
+  }
+
   var message = problems.length
     ? '設定に問題があります:\n - ' + problems.join('\n - ')
-    : '設定は正常です。タイムゾーン: ' + cfg.timeZone + ' / 既定カレンダー: ' + cfg.calendarId;
+    : [
+      '設定は正常です。',
+      '  タイムゾーン      : ' + cfg.timeZone,
+      '  既定カレンダー    : ' + cfg.calendarId,
+      '  確認を挟む範囲    : ' + cfg.confirmBeforeCreate,
+      '  グループの閾値    : ' + cfg.groupMinConfidence,
+      '  即登録キーワード  : ' + cfg.groupTrigger,
+      '  許可リスト        : ' + (cfg.allowedSourceIds.length
+        ? cfg.allowedSourceIds.join(', ') : '（未設定＝全許可）')
+    ].join('\n');
   console.log(message);
   return message;
 }
@@ -822,22 +868,47 @@ function deleteEventById_(calendarId, eventId) {
  * 「取消」用の直前登録の記録
  * ------------------------------------------------------------------ */
 
+/**
+ * スクリプトプロパティの読み取り→書き戻しを直列化する。
+ * グループでは複数人の投稿がほぼ同時に届くことがあり、GAS はそれを並行実行するため、
+ * ロックしないと後勝ちで他方の記録が消える。取れなくても処理自体は続行する。
+ */
+function withScriptLock_(fn) {
+  var lock = LockService.getScriptLock();
+  var locked = false;
+  try {
+    locked = lock.tryLock(10000);
+    if (!locked) console.warn('ロックを取得できませんでした。そのまま続行します。');
+  } catch (err) {
+    console.warn('ロックの取得に失敗: ' + err);
+  }
+  try {
+    return fn();
+  } finally {
+    if (locked) lock.releaseLock();
+  }
+}
+
 function rememberLastEvents_(sourceId, calendarId, eventIds) {
   if (!sourceId || !eventIds.length) return;
-  var props = getProps_();
-  var map = parseJsonProperty_(props.getProperty(PROP.LAST_EVENTS));
-  map[sourceId] = { calendarId: calendarId, eventIds: eventIds, at: new Date().toISOString() };
-  props.setProperty(PROP.LAST_EVENTS, JSON.stringify(trimLastEvents_(map)));
+  withScriptLock_(function () {
+    var props = getProps_();
+    var map = parseJsonProperty_(props.getProperty(PROP.LAST_EVENTS));
+    map[sourceId] = { calendarId: calendarId, eventIds: eventIds, at: new Date().toISOString() };
+    props.setProperty(PROP.LAST_EVENTS, JSON.stringify(trimLastEvents_(map)));
+  });
 }
 
 function takeLastEvents_(sourceId) {
-  var props = getProps_();
-  var map = parseJsonProperty_(props.getProperty(PROP.LAST_EVENTS));
-  var entry = map[sourceId];
-  if (!entry) return null;
-  delete map[sourceId];
-  props.setProperty(PROP.LAST_EVENTS, JSON.stringify(map));
-  return entry;
+  return withScriptLock_(function () {
+    var props = getProps_();
+    var map = parseJsonProperty_(props.getProperty(PROP.LAST_EVENTS));
+    var entry = map[sourceId];
+    if (!entry) return null;
+    delete map[sourceId];
+    props.setProperty(PROP.LAST_EVENTS, JSON.stringify(map));
+    return entry;
+  });
 }
 
 /** スクリプトプロパティが肥大化しないよう、新しい順に 50 トークまでに保つ。 */
@@ -1279,18 +1350,21 @@ function handleWebhookEvent_(cfg, event) {
 
   var ctx = sourceContext_(event);
 
-  if (event.type === 'join' || event.type === 'follow') {
-    lineReply_(cfg.accessToken, event.replyToken, [helpText_(cfg, ctx)]);
-    return;
-  }
+  var isGreeting = event.type === 'join' || event.type === 'follow';
   var isText = event.type === 'message' && event.message && event.message.type === 'text';
-  var isPostback = event.type === 'postback' && event.postback;
-  if (!isText && !isPostback) return; // スタンプ・画像などは対象外
+  var isPostback = event.type === 'postback' && !!event.postback;
+  if (!isGreeting && !isText && !isPostback) return; // スタンプ・画像などは対象外
 
+  // 招待・友だち追加の時点で弾く。ID を返すので、許可リストへの追加もここから行える
   if (!isAllowedSource_(cfg, ctx)) {
     console.warn('許可されていないトークからの受信: ' + ctx.sourceId);
     lineReply_(cfg.accessToken, event.replyToken,
       ['このトークからの登録は許可されていません。\n管理者に次の ID を伝えてください。\n' + ctx.sourceId]);
+    return;
+  }
+
+  if (isGreeting) {
+    lineReply_(cfg.accessToken, event.replyToken, [helpText_(cfg, ctx)]);
     return;
   }
 
