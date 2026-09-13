@@ -671,8 +671,21 @@ function showWebhookUrl() {
     return notDeployed;
   }
   // getUrl() は開発用の /dev を返すことがあるが、LINE に登録するのは公開版の /exec
-  var url = base.replace(/\/dev$/, '/exec') + '?token=' + encodeURIComponent(cfg.webhookToken);
-  console.log('LINE Developers の「Webhook URL」にこれを貼り付けてください:\n' + url);
+  var exec = base.replace(/\/dev$/, '/exec');
+  var query = '?token=' + encodeURIComponent(cfg.webhookToken);
+  var url = exec + query;
+
+  // Google Workspace のアカウントでは /a/<ドメイン>/ 付きの URL が返る。
+  // この形は外部から匿名で呼ばれたときにログイン画面へ飛ばされることがあるため、
+  // ドメインを外した形も併せて出し、届かない場合に試せるようにしておく。
+  var plain = exec.replace(/^https:\/\/script\.google\.com\/a\/[^/]+\//,
+    'https://script.google.com/') + query;
+
+  var lines = ['LINE Developers の「Webhook URL」にこれを貼り付けてください:', url];
+  if (plain !== url) {
+    lines.push('', 'これで反応がないときは、こちら（ドメインなしの形）を試してください:', plain);
+  }
+  console.log(lines.join('\n'));
   return url;
 }
 

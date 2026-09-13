@@ -475,6 +475,15 @@ const liveEvents = (env, id) => (env.state.calendars.get(id || 'primary') || { _
   env.state.webAppUrl = 'https://script.google.com/macros/s/AKfyTEST/dev';
   assertTrue('URL: /dev を /exec に直す', env.sandbox.showWebhookUrl().includes('/exec?token='));
 
+  // Google Workspace の /a/<ドメイン>/ 付き URL では、ドメインなしの形も案内する
+  env.state.webAppUrl = 'https://script.google.com/a/example.co.jp/macros/s/AKfyTEST/exec';
+  const both = env.sandbox.showWebhookUrl();
+  check('URL: Workspace形式はそのまま返す', both,
+    'https://script.google.com/a/example.co.jp/macros/s/AKfyTEST/exec?token=' + TOKEN);
+  const logged = env.state.logs.map((l) => l[1]).join('\n');
+  assertTrue('URL: ドメインなしの形も案内する',
+    logged.includes('https://script.google.com/macros/s/AKfyTEST/exec?token=' + TOKEN));
+
   // 未デプロイ
   env.state.webAppUrl = null;
   assertTrue('URL: 未デプロイを案内', env.sandbox.showWebhookUrl().includes('デプロイされていません'));
