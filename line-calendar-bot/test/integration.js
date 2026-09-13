@@ -464,29 +464,21 @@ const liveEvents = (env, id) => (env.state.calendars.get(id || 'primary') || { _
   check('ロック: 取得したぶんだけ解放', env.state.lockReleased, env.state.lockTaken);
 })();
 
-// 17. Webhook URL の組み立て
+// 17. Webhook URL の案内
 (function () {
   const env = setup();
-  const url = env.sandbox.showWebhookUrl();
-  check('URL: exec と合言葉が付く', url,
-    'https://script.google.com/macros/s/AKfyTEST/exec?token=' + TOKEN);
-
-  // 開発用の /dev が返ってきても公開版の /exec に直す
-  env.state.webAppUrl = 'https://script.google.com/macros/s/AKfyTEST/dev';
-  assertTrue('URL: /dev を /exec に直す', env.sandbox.showWebhookUrl().includes('/exec?token='));
-
-  // Google Workspace の /a/<ドメイン>/ 付き URL では、ドメインなしの形も案内する
-  env.state.webAppUrl = 'https://script.google.com/a/example.co.jp/macros/s/AKfyTEST/exec';
-  const both = env.sandbox.showWebhookUrl();
-  check('URL: Workspace形式はそのまま返す', both,
-    'https://script.google.com/a/example.co.jp/macros/s/AKfyTEST/exec?token=' + TOKEN);
-  const logged = env.state.logs.map((l) => l[1]).join('\n');
-  assertTrue('URL: ドメインなしの形も案内する',
-    logged.includes('https://script.google.com/macros/s/AKfyTEST/exec?token=' + TOKEN));
+  check('URL: 足す文字列を返す', env.sandbox.showWebhookUrl(), '?token=' + TOKEN);
+  const logged = () => env.state.logs.map((l) => l[1]).join('\n');
+  assertTrue('URL: デプロイ画面のURLを使うよう案内', logged().includes('デプロイを管理'));
+  assertTrue('URL: 参考URLも出す', logged().includes('https://script.google.com/macros/s/AKfyTEST/exec?token=' + TOKEN));
+  assertTrue('URL: テスト用URLの注意を出す', logged().includes('テスト用の URL には LINE から届きません'));
 
   // 未デプロイ
-  env.state.webAppUrl = null;
-  assertTrue('URL: 未デプロイを案内', env.sandbox.showWebhookUrl().includes('デプロイされていません'));
+  const notDeployed = setup();
+  notDeployed.state.webAppUrl = null;
+  notDeployed.sandbox.showWebhookUrl();
+  assertTrue('URL: 未デプロイを案内',
+    notDeployed.state.logs.map((l) => l[1]).join('\n').includes('デプロイされていません'));
 
   const noToken = setup();
   noToken.state.props.delete('WEBHOOK_TOKEN');

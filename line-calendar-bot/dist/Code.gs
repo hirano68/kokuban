@@ -653,8 +653,15 @@ function parseJsonProperty_(value) {
 }
 
 /**
- * LINE Developers に貼り付ける Webhook URL を組み立てて返す。
- * GAS エディタから実行すると、ウェブアプリの URL に合言葉を付けたものがログに出る。
+ * LINE に登録する Webhook URL の作り方を表示する。
+ *
+ * ScriptApp.getService().getUrl() は、エディタから実行するとテスト用（HEAD）の
+ * デプロイの URL を返すことがある。テスト用の URL は編集権限のある人しか開けず、
+ * LINE からは絶対に届かない。公開版の URL を知る手段がスクリプト側にないため、
+ * 「デプロイを管理」に表示されている URL を使ってもらい、
+ * ここでは末尾に足す合言葉の部分だけを確実に出す。
+ *
+ * @return {string} URL の末尾に足す文字列（?token=...）
  */
 function showWebhookUrl() {
   var cfg = getConfig_();
@@ -663,30 +670,35 @@ function showWebhookUrl() {
     console.log(missing);
     return missing;
   }
+
+  var query = '?token=' + encodeURIComponent(cfg.webhookToken);
+  var lines = [
+    '■ LINE に登録する Webhook URL の作り方',
+    '',
+    '1.「デプロイ」>「デプロイを管理」を開き、表示されている',
+    '   ウェブアプリの URL をコピーする',
+    '   （https://script.google.com/macros/s/AKfycb.../exec の形）',
+    '',
+    '2. その末尾に、次の文字列をそのまま足す',
+    '',
+    '   ' + query,
+    '',
+    '3. できあがった URL を LINE Developers の「Webhook URL」に貼って更新する'
+  ];
+
   var base = ScriptApp.getService().getUrl();
   if (!base) {
-    var notDeployed = 'まだウェブアプリとしてデプロイされていません。'
-      + '「デプロイ > 新しいデプロイ > ウェブアプリ」を先に行ってください。';
-    console.log(notDeployed);
-    return notDeployed;
+    lines.push('', '※ まだウェブアプリとしてデプロイされていません。先にデプロイしてください。');
+  } else {
+    lines.push(
+      '',
+      '（参考）このスクリプトから見えている URL: ' + base + query,
+      '※ エディタから実行した場合、これは公開版ではなくテスト用の URL のことがあります。',
+      '   テスト用の URL には LINE から届きません。必ず 1. の URL を使ってください。');
   }
-  // getUrl() は開発用の /dev を返すことがあるが、LINE に登録するのは公開版の /exec
-  var exec = base.replace(/\/dev$/, '/exec');
-  var query = '?token=' + encodeURIComponent(cfg.webhookToken);
-  var url = exec + query;
 
-  // Google Workspace のアカウントでは /a/<ドメイン>/ 付きの URL が返る。
-  // この形は外部から匿名で呼ばれたときにログイン画面へ飛ばされることがあるため、
-  // ドメインを外した形も併せて出し、届かない場合に試せるようにしておく。
-  var plain = exec.replace(/^https:\/\/script\.google\.com\/a\/[^/]+\//,
-    'https://script.google.com/') + query;
-
-  var lines = ['LINE Developers の「Webhook URL」にこれを貼り付けてください:', url];
-  if (plain !== url) {
-    lines.push('', 'これで反応がないときは、こちら（ドメインなしの形）を試してください:', plain);
-  }
   console.log(lines.join('\n'));
-  return url;
+  return query;
 }
 
 /** 設定が揃っているか確認する。GAS エディタから直接実行して確認できる。 */
