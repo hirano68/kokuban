@@ -246,17 +246,17 @@ const liveEvents = (env, id) => (env.state.calendars.get(id || 'primary') || { _
 // 2. 個人トーク: 予定が登録され、内容が返信される
 (function () {
   const env = setup();
-  post(env, [textEvent('9/15 14:00 現場打合せ @仙台営業所', USER)]);
+  post(env, [textEvent('9/15 14:00 現場打合せ @現場事務所', USER)]);
   const evs = liveEvents(env);
   check('個人: 件数', evs.length, 1);
   check('個人: 件名', evs[0].title, '現場打合せ');
-  check('個人: 場所', evs[0].location, '仙台営業所');
+  check('個人: 場所', evs[0].location, '現場事務所');
   check('個人: 開始', evs[0].start.getHours() + ':' + evs[0].start.getMinutes(), '14:0');
   check('個人: 終日でない', evs[0].allDay, false);
   const r = replies(env)[0] || '';
   assertTrue('個人: 返信に日時が入る', r.includes('9/15(火) 14:00-15:00'));
   assertTrue('個人: 返信に件名が入る', r.includes('現場打合せ'));
-  assertTrue('個人: 返信に場所が入る', r.includes('仙台営業所'));
+  assertTrue('個人: 返信に場所が入る', r.includes('現場事務所'));
 })();
 
 // 3. 同じ webhookEventId の再送は無視する

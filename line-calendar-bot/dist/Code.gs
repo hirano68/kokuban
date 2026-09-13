@@ -1244,7 +1244,7 @@ function calendarDayUrl_(date, tz) {
 }
 
 function hintText_() {
-  return '日付を読み取れませんでした。\n例）9/15 14:00 現場打合せ @仙台営業所\n\n「ヘルプ」で書き方を確認できます。';
+  return '日付を読み取れませんでした。\n例）9/15 14:00 現場打合せ @現場事務所\n\n「ヘルプ」で書き方を確認できます。';
 }
 
 function helpText_(cfg, ctx) {
@@ -1260,7 +1260,7 @@ function helpText_(cfg, ctx) {
   return lines.concat([
     '',
     '【例】',
-    '9/15 14:00 現場打合せ @仙台営業所',
+    '9/15 14:00 現場打合せ @現場事務所',
     '9月15日(火) 10時〜12時 配筋検査',
     '明日 8時 朝礼',
     '来週金曜 終日 社内研修',
@@ -1454,7 +1454,7 @@ function fmtForTest_(d) {
 /** 解析だけを試す（カレンダーには登録しない）。文字列を渡して結果をログで確認する。 */
 function tryParse(text) {
   var cfg = getConfig_();
-  var list = parseSchedules(text || '9/15 14:00 現場打合せ @仙台営業所', new Date(), {
+  var list = parseSchedules(text || '9/15 14:00 現場打合せ @現場事務所', new Date(), {
     defaultDurationMinutes: cfg.defaultDurationMinutes
   });
   if (!list.length) { console.log('解析できませんでした。'); return '解析できませんでした。'; }
