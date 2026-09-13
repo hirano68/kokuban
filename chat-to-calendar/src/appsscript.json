@@ -1,0 +1,29 @@
+{
+  "timeZone": "Asia/Tokyo",
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8",
+  "chat": {},
+  "dependencies": {
+    "enabledAdvancedServices": [
+      {
+        "userSymbol": "Calendar",
+        "serviceId": "calendar",
+        "version": "v3"
+      },
+      {
+        "userSymbol": "Chat",
+        "serviceId": "chat",
+        "version": "v1"
+      }
+    ]
+  },
+  "oauthScopes": [
+    "https://www.googleapis.com/auth/calendar",
+    "https://www.googleapis.com/auth/chat.spaces.readonly",
+    "https://www.googleapis.com/auth/chat.messages.readonly",
+    "https://www.googleapis.com/auth/chat.messages.create",
+    "https://www.googleapis.com/auth/script.scriptapp",
+    "https://www.googleapis.com/auth/script.external_request",
+    "https://www.googleapis.com/auth/script.send_mail"
+  ]
+}
