@@ -38,6 +38,16 @@ var Parser = (function () {
     ],
     // これらが含まれる行は予定として登録しない
     ignoreKeywords: ['中止', 'キャンセル', '延期', 'リスケ', '欠席', '見送り'],
+    /**
+     * キーワードをどの範囲で探すか。
+     *   'segment' … 日時が書かれている行・文そのものにキーワードが必要（誤検出が少ない）
+     *   'message' … メッセージのどこかにあればよい（拾い漏らしが少ない）
+     */
+    keywordScope: 'segment',
+    /** 日付と時刻の両方がそろっているものだけ登録する（さらに厳しくしたいとき） */
+    requireDateAndTime: false,
+    /** 「〜しました」「先ほど〜」のような報告・過去形の文は予定として扱わない */
+    ignorePastReports: true,
     defaultDurationMinutes: 60,
     allDayWhenNoTime: true,
     // 「3時」のように午前/午後の指定が無い場合、この範囲の時刻は午後とみなす（現場は早朝開始が多いので既定は 1〜5 時）
@@ -308,6 +318,16 @@ var Parser = (function () {
     return null;
   }
 
+  // 「〜しました」「〜ておりました」のような報告文。予定ではなく実績なので登録しない。
+  // 「9/25に変更になりました」のような予定変更の連絡は残したいので「なりました」は含めない。
+  var PAST_REPORT_RE = /(?:しました|されました|できました|いたしました|ておりました|ていました|でした|済みです|完了です)\s*[。．.!！)）」]*$/;
+  var PAST_MARKER_RE = /(先ほど|さきほど|先程|昨日|一昨日|過日)/;
+
+  function isPastReport(text) {
+    var t = String(text).trim();
+    return PAST_REPORT_RE.test(t) || PAST_MARKER_RE.test(t);
+  }
+
   function hasAny(text, words) {
     for (var i = 0; i < words.length; i++) {
       if (words[i] && text.indexOf(words[i]) !== -1) return true;
@@ -498,7 +518,9 @@ var Parser = (function () {
 
     if (!cfg.explicit && hasAny(norm, cfg.ignoreKeywords)) return { events: [], skipped: 'ignoreKeyword' };
 
-    var messageHasKeyword = !cfg.requireKeyword || cfg.explicit || hasAny(norm, cfg.keywords);
+    // キーワード判定をメッセージ全体で行うモードのときだけ、ここで一度に判定する
+    var messageHasKeyword = !cfg.requireKeyword || cfg.explicit ||
+      (cfg.keywordScope === 'message' && hasAny(norm, cfg.keywords));
 
     // 行に加えて「。」でも区切る（「3時間かかります。明日 搬入します」→ 件名を「搬入します」にするため）
     var lines = [];
@@ -508,10 +530,22 @@ var Parser = (function () {
     });
     var events = [];
     var seen = {};
+    var skipReason = null;
     for (var i = 0; i < lines.length; i++) {
+      if (!cfg.explicit && cfg.ignorePastReports && isPastReport(lines[i])) {
+        skipReason = skipReason || 'pastReport';
+        continue;
+      }
       var ev = parseLine(lines[i], base, cfg);
       if (!ev) continue;
-      if (!messageHasKeyword && !hasAny(lines[i], cfg.keywords)) continue;
+      if (!messageHasKeyword && !hasAny(lines[i], cfg.keywords)) {
+        skipReason = skipReason || 'noKeyword';
+        continue;
+      }
+      if (cfg.requireDateAndTime && !(ev.hasDate && ev.hasTime)) {
+        skipReason = skipReason || 'needDateAndTime';
+        continue;
+      }
       if (!ev.title) ev.title = cfg.defaultTitle;
       var key = ev.title + '@' + ev.start.getTime() + '@' + ev.end.getTime();
       if (seen[key]) continue;
@@ -519,7 +553,7 @@ var Parser = (function () {
       events.push(ev);
       if (events.length >= cfg.maxEventsPerMessage) break;
     }
-    if (!events.length) return { events: [], skipped: messageHasKeyword ? 'noSchedule' : 'noKeyword' };
+    if (!events.length) return { events: [], skipped: skipReason || 'noSchedule' };
     return { events: events, skipped: null };
   }
 

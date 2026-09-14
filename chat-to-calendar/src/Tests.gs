@@ -122,6 +122,38 @@ var Tests = (function () {
       expect: [{ when: '2026-09-13 09:30..2026-09-13 10:30', title: 'ミーティング' }]
     },
     { name: '予定でない雑談は無視', text: 'お疲れ様です。了解しました。', expectEmpty: true },
+    {
+      name: '報告（〜しておりました）は登録しない',
+      text: '先ほどAmazonで配達状況確認したところ、9/14に納品予定になっておりました',
+      expectEmpty: true
+    },
+    {
+      name: '完了報告は登録しない',
+      text: 'ガス屋さんと空調屋さんは、朝に配管の墨出しをしました。',
+      expectEmpty: true
+    },
+    {
+      name: 'キーワードは日時と同じ文に必要（別の話題に引きずられない）',
+      text: '作業予定の件です。給与計算に進めないため、17時までに申請をお願いします',
+      expectEmpty: true
+    },
+    {
+      name: '手順の説明文を予定にしない',
+      text: '毎週 AnyONE に案件を登録しておけば、8:20 に案件一覧へ自動で行が足されます',
+      expectEmpty: true
+    },
+    {
+      name: 'keywordScope=message なら文をまたいで拾う',
+      text: '打合せの件です。\n9/22 13:00 事務所',
+      cfg: { keywordScope: 'message' },
+      expect: [{ when: '2026-09-22 13:00..2026-09-22 14:00', title: '事務所' }]
+    },
+    {
+      name: 'requireDateAndTime=true なら終日予定は作らない',
+      text: '9/28 上棟',
+      cfg: { requireDateAndTime: true },
+      expectEmpty: true
+    },
     { name: '中止・延期の連絡は登録しない', text: '9/20の打合せは中止です', expectEmpty: true },
     { name: '過去の日付は登録しない', text: '9/1 10:00 打合せ', expectEmpty: true },
     { name: 'キーワードが無ければ拾わない', text: '9/20 10:00 よろしく', expectEmpty: true },

@@ -47,8 +47,20 @@ var CONFIG_BASE = {
   keywords: null,
   /** 追加キーワード（既定リストに足す） */
   extraKeywords: [],
-  /** この語を含む行は無視する */
+  /** この語を含むメッセージは無視する（null なら既定リスト） */
   ignoreKeywords: null,
+  /** 既定の無視リストに足す語。例: ['日報', '週報'] */
+  extraIgnoreKeywords: [],
+  /**
+   * キーワードをどの範囲で探すか。
+   *   'segment' … 日時が書かれている行・文そのものにキーワードが必要（誤検出が少ない・推奨）
+   *   'message' … メッセージのどこかにあればよい（拾い漏らしが少ない）
+   */
+  keywordScope: 'segment',
+  /** 日付と時刻の両方がそろっているものだけ登録する（雑談の多いスペース向け） */
+  requireDateAndTime: false,
+  /** 「〜しました」「先ほど〜」のような報告・過去形の文は登録しない */
+  ignorePastReports: true,
   defaultDurationMinutes: 60,
   allDayWhenNoTime: true,
   pmAssumeFrom: 1,
@@ -100,6 +112,10 @@ function getConfig() {
     keywords = keywords.concat(cfg.extraKeywords);
   }
   cfg.keywords = keywords;
-  if (!cfg.ignoreKeywords) cfg.ignoreKeywords = Parser.DEFAULTS.ignoreKeywords;
+  var ignore = cfg.ignoreKeywords || Parser.DEFAULTS.ignoreKeywords;
+  if (cfg.extraIgnoreKeywords && cfg.extraIgnoreKeywords.length) {
+    ignore = ignore.concat(cfg.extraIgnoreKeywords);
+  }
+  cfg.ignoreKeywords = ignore;
   return cfg;
 }

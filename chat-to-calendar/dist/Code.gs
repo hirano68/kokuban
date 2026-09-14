@@ -69,8 +69,20 @@ var CONFIG_BASE = {
   keywords: null,
   /** 追加キーワード（既定リストに足す） */
   extraKeywords: [],
-  /** この語を含む行は無視する */
+  /** この語を含むメッセージは無視する（null なら既定リスト） */
   ignoreKeywords: null,
+  /** 既定の無視リストに足す語。例: ['日報', '週報'] */
+  extraIgnoreKeywords: [],
+  /**
+   * キーワードをどの範囲で探すか。
+   *   'segment' … 日時が書かれている行・文そのものにキーワードが必要（誤検出が少ない・推奨）
+   *   'message' … メッセージのどこかにあればよい（拾い漏らしが少ない）
+   */
+  keywordScope: 'segment',
+  /** 日付と時刻の両方がそろっているものだけ登録する（雑談の多いスペース向け） */
+  requireDateAndTime: false,
+  /** 「〜しました」「先ほど〜」のような報告・過去形の文は登録しない */
+  ignorePastReports: true,
   defaultDurationMinutes: 60,
   allDayWhenNoTime: true,
   pmAssumeFrom: 1,
@@ -122,7 +134,11 @@ function getConfig() {
     keywords = keywords.concat(cfg.extraKeywords);
   }
   cfg.keywords = keywords;
-  if (!cfg.ignoreKeywords) cfg.ignoreKeywords = Parser.DEFAULTS.ignoreKeywords;
+  var ignore = cfg.ignoreKeywords || Parser.DEFAULTS.ignoreKeywords;
+  if (cfg.extraIgnoreKeywords && cfg.extraIgnoreKeywords.length) {
+    ignore = ignore.concat(cfg.extraIgnoreKeywords);
+  }
+  cfg.ignoreKeywords = ignore;
   return cfg;
 }
 
@@ -170,6 +186,16 @@ var Parser = (function () {
     ],
     // これらが含まれる行は予定として登録しない
     ignoreKeywords: ['中止', 'キャンセル', '延期', 'リスケ', '欠席', '見送り'],
+    /**
+     * キーワードをどの範囲で探すか。
+     *   'segment' … 日時が書かれている行・文そのものにキーワードが必要（誤検出が少ない）
+     *   'message' … メッセージのどこかにあればよい（拾い漏らしが少ない）
+     */
+    keywordScope: 'segment',
+    /** 日付と時刻の両方がそろっているものだけ登録する（さらに厳しくしたいとき） */
+    requireDateAndTime: false,
+    /** 「〜しました」「先ほど〜」のような報告・過去形の文は予定として扱わない */
+    ignorePastReports: true,
     defaultDurationMinutes: 60,
     allDayWhenNoTime: true,
     // 「3時」のように午前/午後の指定が無い場合、この範囲の時刻は午後とみなす（現場は早朝開始が多いので既定は 1〜5 時）
@@ -440,6 +466,16 @@ var Parser = (function () {
     return null;
   }
 
+  // 「〜しました」「〜ておりました」のような報告文。予定ではなく実績なので登録しない。
+  // 「9/25に変更になりました」のような予定変更の連絡は残したいので「なりました」は含めない。
+  var PAST_REPORT_RE = /(?:しました|されました|できました|いたしました|ておりました|ていました|でした|済みです|完了です)\s*[。．.!！)）」]*$/;
+  var PAST_MARKER_RE = /(先ほど|さきほど|先程|昨日|一昨日|過日)/;
+
+  function isPastReport(text) {
+    var t = String(text).trim();
+    return PAST_REPORT_RE.test(t) || PAST_MARKER_RE.test(t);
+  }
+
   function hasAny(text, words) {
     for (var i = 0; i < words.length; i++) {
       if (words[i] && text.indexOf(words[i]) !== -1) return true;
@@ -630,7 +666,9 @@ var Parser = (function () {
 
     if (!cfg.explicit && hasAny(norm, cfg.ignoreKeywords)) return { events: [], skipped: 'ignoreKeyword' };
 
-    var messageHasKeyword = !cfg.requireKeyword || cfg.explicit || hasAny(norm, cfg.keywords);
+    // キーワード判定をメッセージ全体で行うモードのときだけ、ここで一度に判定する
+    var messageHasKeyword = !cfg.requireKeyword || cfg.explicit ||
+      (cfg.keywordScope === 'message' && hasAny(norm, cfg.keywords));
 
     // 行に加えて「。」でも区切る（「3時間かかります。明日 搬入します」→ 件名を「搬入します」にするため）
     var lines = [];
@@ -640,10 +678,22 @@ var Parser = (function () {
     });
     var events = [];
     var seen = {};
+    var skipReason = null;
     for (var i = 0; i < lines.length; i++) {
+      if (!cfg.explicit && cfg.ignorePastReports && isPastReport(lines[i])) {
+        skipReason = skipReason || 'pastReport';
+        continue;
+      }
       var ev = parseLine(lines[i], base, cfg);
       if (!ev) continue;
-      if (!messageHasKeyword && !hasAny(lines[i], cfg.keywords)) continue;
+      if (!messageHasKeyword && !hasAny(lines[i], cfg.keywords)) {
+        skipReason = skipReason || 'noKeyword';
+        continue;
+      }
+      if (cfg.requireDateAndTime && !(ev.hasDate && ev.hasTime)) {
+        skipReason = skipReason || 'needDateAndTime';
+        continue;
+      }
       if (!ev.title) ev.title = cfg.defaultTitle;
       var key = ev.title + '@' + ev.start.getTime() + '@' + ev.end.getTime();
       if (seen[key]) continue;
@@ -651,7 +701,7 @@ var Parser = (function () {
       events.push(ev);
       if (events.length >= cfg.maxEventsPerMessage) break;
     }
-    if (!events.length) return { events: [], skipped: messageHasKeyword ? 'noSchedule' : 'noKeyword' };
+    if (!events.length) return { events: [], skipped: skipReason || 'noSchedule' };
     return { events: events, skipped: null };
   }
 
@@ -1619,6 +1669,38 @@ var Tests = (function () {
       expect: [{ when: '2026-09-13 09:30..2026-09-13 10:30', title: 'ミーティング' }]
     },
     { name: '予定でない雑談は無視', text: 'お疲れ様です。了解しました。', expectEmpty: true },
+    {
+      name: '報告（〜しておりました）は登録しない',
+      text: '先ほどAmazonで配達状況確認したところ、9/14に納品予定になっておりました',
+      expectEmpty: true
+    },
+    {
+      name: '完了報告は登録しない',
+      text: 'ガス屋さんと空調屋さんは、朝に配管の墨出しをしました。',
+      expectEmpty: true
+    },
+    {
+      name: 'キーワードは日時と同じ文に必要（別の話題に引きずられない）',
+      text: '作業予定の件です。給与計算に進めないため、17時までに申請をお願いします',
+      expectEmpty: true
+    },
+    {
+      name: '手順の説明文を予定にしない',
+      text: '毎週 AnyONE に案件を登録しておけば、8:20 に案件一覧へ自動で行が足されます',
+      expectEmpty: true
+    },
+    {
+      name: 'keywordScope=message なら文をまたいで拾う',
+      text: '打合せの件です。\n9/22 13:00 事務所',
+      cfg: { keywordScope: 'message' },
+      expect: [{ when: '2026-09-22 13:00..2026-09-22 14:00', title: '事務所' }]
+    },
+    {
+      name: 'requireDateAndTime=true なら終日予定は作らない',
+      text: '9/28 上棟',
+      cfg: { requireDateAndTime: true },
+      expectEmpty: true
+    },
     { name: '中止・延期の連絡は登録しない', text: '9/20の打合せは中止です', expectEmpty: true },
     { name: '過去の日付は登録しない', text: '9/1 10:00 打合せ', expectEmpty: true },
     { name: 'キーワードが無ければ拾わない', text: '9/20 10:00 よろしく', expectEmpty: true },

@@ -173,6 +173,10 @@ dryRun: true                        // ← まずは true で試運転
 - 繰り返しは無限には作らず、既定で毎週なら 26 回・毎月なら 12 回・毎日なら 60 回分までです
   （`recurrenceCounts`）。繰り返しを一切作りたくない場合は `allowRecurring: false`。
 - `中止` `キャンセル` `延期` `リスケ` `欠席` `見送り` を含むメッセージは登録しません（`ignoreKeywords`）。
+- 「〜しました」「〜ておりました」で終わる文や「先ほど」「昨日」を含む文は、予定ではなく報告とみなして登録しません
+  （`ignorePastReports`）。「9/25に変更になりました」のような予定変更の連絡は残します。
+- キーワードは既定では**日時が書かれている行・文そのもの**に必要です。長いメッセージの別の話題に
+  引きずられて誤登録するのを防ぐためです。拾い漏らしが気になる場合は `keywordScope: 'message'`。
 - すでに終わった予定（既定では 2 時間以上前）は登録しません。
 
 ## 5. エディタから実行できる関数
@@ -215,6 +219,10 @@ dryRun: true                        // ← まずは true で試運転
 | `initialLookbackMinutes` | `1440` | 初回に遡る範囲 |
 | `maxMessagesPerSpace` | `200` | 1 回の実行で読む上限 |
 | `requireKeyword` | `true` | キーワードを含むメッセージだけ対象にする |
+| `keywordScope` | `'segment'` | `'segment'`＝日時と同じ行・文にキーワードが必要（誤検出が少ない）／`'message'`＝メッセージのどこかにあればよい |
+| `requireDateAndTime` | `false` | 日付と時刻の両方がそろったものだけ登録する |
+| `ignorePastReports` | `true` | 「〜しました」「先ほど〜」のような報告文は登録しない |
+| `extraIgnoreKeywords` | `[]` | 無視する語を足す。例: `['日報', '週報']` |
 | `keywords` / `extraKeywords` | 既定リスト | 予定とみなすキーワード |
 | `ignoreKeywords` | `中止` ほか | 含まれていたら登録しない語 |
 | `defaultDurationMinutes` | `60` | 終了時刻が無いときの長さ |
@@ -252,7 +260,7 @@ Apps Script 上では `runParserTests` を実行するとログに結果が出�
 | `拡張サービス「Calendar API」が有効になっていません` | エディタの「サービス」で Calendar API (v3) を追加 |
 | スペースが 1 つも出てこない | 実行アカウントがそのスペースに参加しているか。DM を見るなら `includeDirectMessages: true` |
 | 予定が拾われない | `previewOnly` のログで理由を確認（`noKeyword` = キーワード無し、`noSchedule` = 日時が読めない、`ignoreKeyword` = 中止等を検出） |
-| 余計な予定が入る | `requireKeyword: true` のまま `keywords` を絞る、`spaces` を限定する、`ignoreSenders` を使う |
+| 余計な予定が入る | `spaces` を現場のスペースに限定する → `requireDateAndTime: true` にする → `extraIgnoreKeywords` に `'日報'` などを足す、の順で効きます |
 | 入れた予定をまとめて消したい | `CalendarSync.deleteCreatedEvents(getConfig(), 開始日, 終了日)` |
 
 ## 10. 制限事項
