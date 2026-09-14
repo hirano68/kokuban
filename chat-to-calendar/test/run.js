@@ -30,3 +30,14 @@ console.log(result.text);
 if (result.failures.length) {
   process.exitCode = 1;
 }
+
+// dist/Code.gs（貼り付け用の 1 ファイル版）が src と食い違っていないか
+const bundler = require('../tools/bundle.js');
+const current = fs.existsSync(bundler.outFile) ? fs.readFileSync(bundler.outFile, 'utf8') : '';
+if (current !== bundler.build()) {
+  console.log('\n❌ dist/Code.gs が src と一致していません。');
+  console.log('   node chat-to-calendar/tools/bundle.js を実行してください。');
+  process.exitCode = 1;
+} else {
+  console.log('✅ dist/Code.gs は src と一致しています');
+}

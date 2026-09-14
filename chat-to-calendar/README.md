@@ -35,12 +35,22 @@ Google Apps Script（GAS）です。
 ### 2-1. Apps Script プロジェクトを作る
 
 1. <https://script.google.com/> で「新しいプロジェクト」を作成。
-2. `src/` の中身をエディタに貼り付ける（ファイル名は拡張子なしで同じ名前にする）。
-   - `Parser` / `Config` / `Store` / `ChatSource` / `CalendarSync` / `Main` / `Tests`
+2. コードを貼り付ける。**貼り付けは 1 回で済みます。**
+   - `dist/Code.gs`（`src/` を 1 つにまとめた自動生成ファイル）を全部コピーし、
+     最初からある `コード.gs` の中身を消して貼り付ける。
+   - Apps Script はファイルを分ける必要がないため、これで動きます。
+     ファイルを分けて管理したい場合は代わりに `src/` の 7 ファイルを個別に貼り付けても構いません
+     （`Parser` / `Config` / `Store` / `ChatSource` / `CalendarSync` / `Main` / `Tests`）。
 3. 「プロジェクトの設定」→「`appsscript.json` マニフェスト ファイルをエディタで表示する」にチェックを入れ、
    `src/appsscript.json` の内容で上書きする。
 
 > clasp を使う場合は `src/` をそのまま `clasp push` できます（`.gs` と `appsscript.json` がそろっています）。
+
+`dist/Code.gs` は `src/` から自動生成しています。`src/` を直したら次を実行して作り直してください。
+
+```
+node chat-to-calendar/tools/bundle.js
+```
 
 ### 2-2. Google Cloud プロジェクトを紐付けて Chat API を有効化する
 
@@ -226,6 +236,8 @@ dryRun: true                        // ← まずは true で試運転
 ```
 node chat-to-calendar/test/run.js
 ```
+
+`dist/Code.gs` が `src/` と食い違っていないかも、このテストで一緒に確認します。
 
 Apps Script 上では `runParserTests` を実行するとログに結果が出ます。
 読み取りルールを変えたときは、`src/Tests.gs` の `CASES` にケースを足してから直してください。
